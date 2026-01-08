@@ -17,11 +17,6 @@ int main()
 {
     FILE *MNISTImage = fopen("t10k-images.idx3-ubyte", "rb"); // MNIST 이미지 입력
 
-    if (MNISTImage == NULL) {
-        printf("에러: 파일을 찾을 수 없습니다. 경로를 확인해주세요.\n");
-        return 1; // 프로그램 종료
-    }
-
     int magicNumber = 0;     // 파일 형식 식별 번호
     int numberOfImages = 0;  // 파일 안에 들어 있는 총 이미지 개수
     int numberOfRows = 0;    // 이미지 가로 크기
@@ -40,7 +35,7 @@ int main()
     numberOfColumns = reverseInt(numberOfColumns);                   // 변수에 세로 크기 할당
 
     int imgSize = numberOfRows * numberOfColumns; // 이미지 크기 저장
-    int batchSize = 3;                          // 사용할 이미지 개수
+    int batchSize = 3;                            // 사용할 이미지 개수
 
     printf("매직 넘버 : %d\n", magicNumber);
     printf("이미지 개수 : %d\n", numberOfImages);
@@ -52,14 +47,6 @@ int main()
     for (int i = 0; i < batchSize; i++)
     { // 784개의 개별 이미지 픽셀 정보를 저장할 배열 동적 할당
         buffer[i] = (unsigned char *)malloc(sizeof(unsigned char) * imgSize);
-    }
-
-    for (int i = 0; i < numberOfRows; i++)
-    { // 이미지 28x28에서 (0,0),(0,1),(0,2)...(0,27),(1,0),(1,1)...(27,27)까지 탐색
-        for (int j = 0; j < numberOfColumns; j++)
-        {
-            int pixel = i * numberOfRows + j; // 현재 픽셀 위치 정보 저장
-        }
     }
 
     for (int i = 0; i < batchSize; i++)
