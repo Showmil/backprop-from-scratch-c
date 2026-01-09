@@ -1,5 +1,25 @@
 #include <stdio.h>  // 입출력 헤더 파일
 #include <stdlib.h> // 유틸리티 함수 헤더 파일
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+#define ANSI_RESET "\033[0m"
+
+// 윈도우 ANSI 색상 모드 키기
+void setupConsole()
+{
+#ifdef _WIN32
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD dwMode = 0;
+    GetConsoleMode(hOut, &dwMode);
+    dwMode |= 0x0004; // ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    SetConsoleMode(hOut, dwMode);
+
+    // UTF-8 출력 설정
+    SetConsoleOutputCP(65001);
+#endif
+}
 
 int reverseInt(int i)
 {                                    // MNIST는 최상위 비트가 먼저 저장되어 있으므로 이를 뒤집어주는 함수
@@ -15,6 +35,7 @@ int reverseInt(int i)
 
 int main()
 {
+    // setupConsole(); // exe 파일로 실행해볼 때만 활성화!
     FILE *MNISTImage = fopen("t10k-images.idx3-ubyte", "rb"); // MNIST 이미지 입력
 
     int magicNumber = 0;     // 파일 형식 식별 번호
@@ -35,7 +56,7 @@ int main()
     numberOfColumns = reverseInt(numberOfColumns);                   // 변수에 세로 크기 할당
 
     int imgSize = numberOfRows * numberOfColumns; // 이미지 크기 저장
-    int batchSize = 3;                            // 사용할 이미지 개수
+    int batchSize = 30;                           // 사용할 이미지 개수
 
     printf("매직 넘버 : %d\n", magicNumber);
     printf("이미지 개수 : %d\n", numberOfImages);
@@ -54,35 +75,35 @@ int main()
         fread(buffer[i], sizeof(unsigned char), imgSize, MNISTImage);
     }
 
-    for (int i = 0; i < batchSize; i++) // 100개의 이미지 ASCII ART로 출력
-    {
-        for (int j = 0; j < numberOfRows; j++) // 해당 이미지에서 몇 행인지 체크
+    for (int i = 0; i < batchSize; i++)
+    { // 100개의 이미지 순서대로 출력
+        printf("\n[이미지 번호: %d]\n", i + 1);
+        for (int y = 0; y < numberOfColumns; y++)
         {
-            for (int k = 0; k < numberOfColumns; k++) // 해당 이미지에서 몇 열인지 체크
+            for (int x = 0; x < numberOfRows; x++)
             {
-                unsigned char pixel = buffer[i][j * numberOfColumns + k]; // 현재 이미지 픽셀 위치 정보 저장
-                if (pixel == 0)
+                unsigned char pixel = buffer[i][y * numberOfRows + x]; // 현재 픽셀의 위치 정보
+                if (x < 2 || x >= numberOfRows - 2)
                 {
-                    printf("  "); // 픽셀 값이 0 일 시 공백 출력
-                }
-                else if (pixel < 128)
-                {
-                    printf("::"); // 픽셀 값이 1~128일 시 :: 출력
+                    printf(ANSI_RESET "  "); // 이미지 깨짐 문제 방지 위해 양 옆 2개의 픽셀 초기화
                 }
                 else
                 {
-                    printf("##"); // 픽셀 값이 그 외 일시 ## 출력
+                    printf("\033[48;2;%d;%d;%dm  ", pixel, pixel, pixel); // 이미지 출력
                 }
             }
-            printf("\n"); // 28개가 끝날 때 마다 줄 바꿈
+            printf(ANSI_RESET "\n"); // 줄바꾸면서 초기화
         }
     }
+    printf(ANSI_RESET "\n");
 
+    // 메모리 해제
     for (int i = 0; i < batchSize; i++)
-    {
-        free(buffer[i]); // 동적 할당 해제
-    }
-    free(buffer); // 동적 할당 해제
+        free(buffer[i]);
+    free(buffer);
+    fclose(MNISTImage);
+
+    system("pause");
 
     return 0;
 }

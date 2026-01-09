@@ -1,3 +1,5 @@
 .vscode
 /practice-c/t10k-images.idx3-ubyte
 /practice-c/printMNIST.exe
+/practice-c/labelMNIST.exe
+/practice-c/t10k-labels.idx1-ubyte
