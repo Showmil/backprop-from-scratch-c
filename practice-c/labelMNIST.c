@@ -52,8 +52,8 @@ int main()
         }
 
         printf("%d번째 이미지 정답 : %d\n", i + 1, tempLabel);
-        for (int j = 0; j < labelSize; j++){
-            printf("%d ", buffer[i][j]);
+        for (int k = 0; k < labelSize; k++){
+            printf("%d ", buffer[i][k]);
         }
         printf("\n");
     }
