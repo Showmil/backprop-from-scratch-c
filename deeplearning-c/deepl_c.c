@@ -82,27 +82,45 @@ double *createBiasLayer(int input, int output)
 }
 
 // sigmoid 함수
-unsigned char sigmoid(double n)
+double sigmoid(double n)
 {
     return 1 / (1 + exp(-n));
 }
 
-// 활성화 함수
-unsigned char activate(unsigned char *z, int size, unsigned char (*func)(double)) // z: 활성화 함수에 넣을 대상, size: z의 크기, func: 활성화 함수
+// softmax 함수
+double *softmax(double *z, int size)
 {
-    unsigned char *a = (unsigned char *)malloc(sizeof(unsigned char) * size);
+    double sum = 0.0;
+    double *a = (double *)malloc(sizeof(double) * size);
+
     for (int i = 0; i < size; i++)
     {
-        a[i] = sigmoid(z[i]);
+        sum += exp(z[i]);
+    }
+
+    for (int i = 0; i < size; i++)
+    {
+        a[i] = exp(z[i]) / sum;
     }
 
     return a;
 }
 
-// 순전파 연산 함수
-unsigned char *linear(double **w, unsigned char *x, double *b, int input, int output) // w: weight layer, x: input layer, b: bias layer, input: x의 node 개수, output: 출력되는 node 개수
+// 활성화 함수
+double *activate(double *z, int size, double (*func)(double)) // z: 활성화 함수에 넣을 대상, size: z의 크기, func: 활성화 함수
 {
-    unsigned char *z = (unsigned char *)malloc(sizeof(unsigned char) * output); // z 연산 결과 저장 배열
+    double *a = (double *)malloc(sizeof(double) * size);
+    for (int i = 0; i < size; i++)
+    {
+        a[i] = func(z[i]);
+    }
+    return a;
+}
+
+// 순전파 연산 함수
+double *linear(double **w, double *x, double *b, int input, int output) // w: weight layer, x: input layer, b: bias layer, input: x의 node 개수, output: 출력되는 node 개수
+{
+    double *z = (double *)malloc(sizeof(double) * output); // z 연산 결과 저장 배열
     for (int i = 0; i < output; i++)
     {
         z[i] = 0; // 0으로 배열 초기화
@@ -117,6 +135,28 @@ unsigned char *linear(double **w, unsigned char *x, double *b, int input, int ou
     }
 
     return z;
+}
+
+// cross-entropy 손실 함수
+double crossEntropy(double *a, int size, unsigned char *y) // a: 예측값 배열, size: 클래스 개수, y: 실제값 배열
+{
+    double sum = 0.0;
+    for (int i = 0; i < size; i++)
+    {
+        sum += y[i] * log10(a[i]);
+    }
+
+    return -sum;
+}
+
+// 출력층 노드 delta 함수
+double outputDelta()
+{
+}
+
+// 은닉층 노드 delta 함수
+double hiddenDelta()
+{
 }
 
 int main()
@@ -185,10 +225,10 @@ int main()
     }
 
     // 라벨 데이터 저장 배열 생성
-    unsigned char **labelBuffer = (unsigned char **)malloc(sizeof(unsigned char *) * batchSize);
+    unsigned char **labelData = (unsigned char **)malloc(sizeof(unsigned char *) * batchSize);
     for (int i = 0; i < batchSize; i++)
     { // 10개의 라벨 데이터 정보를 저장할 배열 동적 할당
-        labelBuffer[i] = (unsigned char *)malloc(sizeof(unsigned char) * labelSize);
+        labelData[i] = (unsigned char *)malloc(sizeof(unsigned char) * labelSize);
     }
 
     unsigned char tempLabel = 0; // 파일에서 읽어올 1바이트 분량의 임시 변수
@@ -199,18 +239,18 @@ int main()
     {
         if (j == tempLabel)
         {
-            labelBuffer[0][j] = 1; // 정답 인덱스에는 1
+            labelData[0][j] = 1; // 정답 인덱스에는 1
         }
         else
         {
-            labelBuffer[0][j] = 0; // 나머지 인덱스에는 0
+            labelData[0][j] = 0; // 나머지 인덱스에는 0
         }
     }
 
     // 라벨 데이터 출력
     for (int k = 0; k < labelSize; k++)
     {
-        printf("%d ", labelBuffer[0][k]);
+        printf("%d ", labelData[0][k]);
     }
     printf("\n");
     ////////////////////////////////////////////////////////////////////////////
@@ -220,6 +260,20 @@ int main()
     int hiddenLayer1Count = 512; // 은닉층1 뉴런 개수
     int hiddenLayer2Count = 256; // 은닉층2 뉴런 개수
     int outputLayerCount = 10;   // 출력층 뉴런 개수
+
+    double **inputLayer = (double **)malloc(sizeof(double *) * batchSize);
+    for (int i = 0; i < batchSize; i++)
+    {
+        inputLayer[i] = (double *)malloc(sizeof(double) * imgSize);
+    }
+
+    for (int i = 0; i < batchSize; i++) // Input Layer가 unsigned char형이라 double로 전처리
+    {
+        for (int j = 0; j < imgSize; j++)
+        {
+            inputLayer[i][j] = (double)imgBuffer[i][j] / 255.0; // 기울기 소실 방지 위해 255로 나누어 0~1 값으로 정규화
+        }
+    }
 
     double **weightLayer1 = createWeightLayer(imgSize, hiddenLayer1Count);           // weight layer 1(512 * 784) 생성
     double **weightLayer2 = createWeightLayer(hiddenLayer1Count, hiddenLayer2Count); // weight layer 2(256 * 512) 생성
@@ -277,28 +331,47 @@ int main()
     ////////////////////////////////////////////////////////////////////////////
 
     ///////////////////// Forward Propagation(순전파) 연산 //////////////////////
-    /*
-    1. z1 = weight layer 1 * imgBuffer[0] + bias 1 계산
-    2. a1 = sigmoid * z1 계산
-    3. z2 = weight layer 2 * a1 + bias 2 계산
-    4. a2 = sigmoid * z2 계산
-    5. z3 = weight layer 3 * a2 + bias 3 계산
-    6. a3 = softmax * z3 계산
-    7. 함수화 하면서 리팩토링
-    */
-
     // 1. z1 = weight layer 1 * imgBuffer[0] + bias 1 계산
-    double *z1 = linear(weightLayer1, imgBuffer[0], biasLayer1, imgSize, hiddenLayer1Count);
+    double *z1 = linear(weightLayer1, inputLayer[0], biasLayer1, imgSize, hiddenLayer1Count);
+    // 2. a1 = sigmoid * z1 계산
     double *a1 = activate(z1, hiddenLayer1Count, sigmoid);
+    // 3. z2 = weight layer 2 * a1 + bias 2 계산
+    double *z2 = linear(weightLayer2, a1, biasLayer2, hiddenLayer1Count, hiddenLayer2Count);
+    // 4. a2 = sigmoid * z2 계산
+    double *a2 = activate(z2, hiddenLayer2Count, sigmoid);
+    // 5. z3 = weight layer 3 * a2 + bias 3 계산
+    double *z3 = linear(weightLayer3, a2, biasLayer3, hiddenLayer2Count, outputLayerCount);
+    // 6. a3 = softmax * z3 계산
+    double *a3 = softmax(z3, outputLayerCount);
 
-    for (int i = 0; i < hiddenLayer1Count; i++)
+    // 7. 손실 함수를 통한 오차 계산
+    double loss = crossEntropy(a3, outputLayerCount, labelData[0]);
+
+    for (int i = 0; i < 5; i++)
     {
         printf("z1[%d] : %.4f\n", i, z1[i]);
     }
-    for (int i = 0; i < hiddenLayer1Count; i++)
+    for (int i = 0; i < 5; i++)
     {
         printf("a1[%d] : %.4f\n", i, a1[i]);
     }
+    for (int i = 0; i < 5; i++)
+    {
+        printf("z2[%d] : %.4f\n", i, z2[i]);
+    }
+    for (int i = 0; i < 5; i++)
+    {
+        printf("a2[%d] : %.4f\n", i, a2[i]);
+    }
+    for (int i = 0; i < 5; i++)
+    {
+        printf("z3[%d] : %.4f\n", i, z3[i]);
+    }
+    for (int i = 0; i < 10; i++)
+    {
+        printf("a3[%d] : %.4f\n", i, a3[i]);
+    }
+    printf("loss: %.4f\n", loss);
 
     ////////////////////////////////////////////////////////////////////////////
 
@@ -326,8 +399,8 @@ int main()
     free(imgBuffer);
 
     for (int i = 0; i < batchSize; i++)
-        free(labelBuffer[i]);
-    free(labelBuffer);
+        free(labelData[i]);
+    free(labelData);
 
     for (int i = 0; i < hiddenLayer1Count; i++)
         free(weightLayer1[i]);
@@ -347,6 +420,10 @@ int main()
 
     free(z1);
     free(a1);
+    free(z2);
+    free(a2);
+    free(z3);
+    free(a3);
 
     fclose(img);
     fclose(label);
