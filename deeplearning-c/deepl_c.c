@@ -87,6 +87,12 @@ double sigmoid(double n)
     return 1 / (1 + exp(-n));
 }
 
+// sigmoid 미분 함수
+double sigmoidPrime(double n)
+{
+    return sigmoid(n) * (1 - sigmoid(n));
+}
+
 // softmax 함수
 double *softmax(double *z, int size)
 {
@@ -150,13 +156,52 @@ double crossEntropy(double *a, int size, unsigned char *y) // a: 예측값 배�
 }
 
 // 출력층 노드 delta 함수
-double outputDelta()
+double *createOutputDelta(unsigned char *y, double *a, int size) // y: 정답값, a: 출력층 예측값
 {
+    double *d = (double *)malloc(sizeof(double) * size);
+    for (int i = 0; i < size; i++)
+    {
+        d[i] = -(y[i] * (1 - a[i]));
+    }
+    return d;
 }
 
 // 은닉층 노드 delta 함수
-double hiddenDelta()
+double *createHiddenDelta(double *z, double *next, double **w, int currSize, int nextSize)
+// z: 현재 레이어의 z값 배열, next: 다음 레이어의 델타값 배열, w: 두 레이어를 잇는 가중치
 {
+    double *d = (double *)malloc(sizeof(double) * currSize);
+    for (int i = 0; i < currSize; i++)
+    {
+        double sum = 0.0;
+        for (int j = 0; j < nextSize; j++)
+        {
+            sum += w[i][j] * next[j];
+        }
+        d[i] = sum * sigmoid(z[i]) * (1 - sigmoid(z[i]));
+    }
+    return d;
+}
+
+// 경사 하강법 함수
+double gradientDescent(double dL_dw, double w, double n)
+// dL_dw : 기울기, w: 기존 w값, n: 학습률
+{
+    return w - n * dL_dw;
+}
+
+// 역전파 계산 함수
+void backpropagation(double *x, double *delta, double **w, int inputSize, int deltaSize)
+// x: 입력값, delta: 델타값, w: 가중치 배열
+{
+    for (int i = 0; i < inputSize; i++)
+    {
+        for (int j = 0; j < deltaSize; j++)
+        {
+            double dL_dw = delta[j] * x[i];
+            w[i][j] = gradientDescent(dL_dw, w[i][j], 0.01);
+        }
+    }
 }
 
 int main()
@@ -347,6 +392,7 @@ int main()
     // 7. 손실 함수를 통한 오차 계산
     double loss = crossEntropy(a3, outputLayerCount, labelData[0]);
 
+    /*
     for (int i = 0; i < 5; i++)
     {
         printf("z1[%d] : %.4f\n", i, z1[i]);
@@ -372,6 +418,7 @@ int main()
         printf("a3[%d] : %.4f\n", i, a3[i]);
     }
     printf("loss: %.4f\n", loss);
+    */
 
     ////////////////////////////////////////////////////////////////////////////
 
@@ -385,6 +432,43 @@ int main()
     6. hidden layer 1 ~ input layer 간 weight 업데이트
     7. 함수화 하면서 리팩토링
     */
+
+    double *outputDelta = createOutputDelta(labelData[0], a3, outputLayerCount);
+    double *hiddenLayer2Delta = createHiddenDelta(z2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
+    double *hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer1Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
+
+    backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
+    backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
+    backpropagation(inputLayer[0], hiddenLayer1Delta, weightLayer1, imgSize, hiddenLayer1Count);
+
+    // weight layer 1(512 * 784) 출력
+    printf("--------------------------Backpropagation------------------------------------\n");
+    for (int i = 0; i < 5; i++)
+    {
+        for (int j = 0; j < 5; j++)
+        {
+            printf("weight(input node[%d] -> hidden layer 1[%d]) : %.4f\n", j, i, weightLayer1[i][j]);
+        }
+    }
+
+    // weight layer 2(256 * 512) 출력
+    for (int i = 0; i < 5; i++)
+    {
+        for (int j = 0; j < 5; j++)
+        {
+            printf("weight(hidden layer 1[%d] -> hidden layer 2[%d]) : %.4f\n", j, i, weightLayer2[i][j]);
+        }
+    }
+
+    // weight layer 3(10 * 256) 출력
+    for (int i = 0; i < 5; i++)
+    {
+        for (int j = 0; j < 5; j++)
+        {
+            printf("weight(hidden layer 2[%d] -> output layer[%d]) : %.4f\n", j, i, weightLayer3[i][j]);
+        }
+    }
+
     ////////////////////////////////////////////////////////////////////////////
 
     /////////////// 나머지 9999개의 이미지 행렬화 해서 빠르게 연산 ////////////////
