@@ -37,12 +37,94 @@ int reverseInt(int i)
     return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4; // 추출한 바이트들을 역순으로 재조립해 return!
 }
 
+// 가중치 레이어 생성 및 초기화 함수
+double **createWeightLayer(int input, int output)
+{
+    // 가중치 레이어 동적 할당
+    double **layer = (double **)malloc(sizeof(double *) * output);
+    for (int i = 0; i < output; i++)
+    {
+        layer[i] = (double *)malloc(sizeof(double) * input);
+    }
+
+    // Xavier's uniform distribution 초기화 범위 계산
+    double limit = sqrt(6.0 / ((double)input + (double)output));
+
+    // Xavier 초기화
+    for (int i = 0; i < output; i++)
+    {
+        for (int j = 0; j < input; j++)
+        {
+            // -limit ~ +limit 사이 랜덤 값
+            layer[i][j] = ((double)rand() / RAND_MAX) * (2.0 * limit) - limit;
+        }
+    }
+
+    return layer;
+}
+
+// 편향 행렬 생성 및 초기화 함수
+double *createBiasLayer(int input, int output)
+{
+    // 편향 행렬 동적 할당
+    double *layer = (double *)malloc(sizeof(double) * output);
+
+    // Xavier's uniform distribution 초기화 범위 계산
+    double limit = sqrt(6.0 / ((double)input + (double)output));
+
+    // Xavier 초기화
+    for (int i = 0; i < output; i++)
+    {
+        layer[i] = ((double)rand() / RAND_MAX) * (2.0 * limit) - limit;
+    }
+
+    return layer;
+}
+
+// sigmoid 함수
+unsigned char sigmoid(double n)
+{
+    return 1 / (1 + exp(-n));
+}
+
+// 활성화 함수
+unsigned char activate(unsigned char *z, int size, unsigned char (*func)(double)) // z: 활성화 함수에 넣을 대상, size: z의 크기, func: 활성화 함수
+{
+    unsigned char *a = (unsigned char *)malloc(sizeof(unsigned char) * size);
+    for (int i = 0; i < size; i++)
+    {
+        a[i] = sigmoid(z[i]);
+    }
+
+    return a;
+}
+
+// 순전파 연산 함수
+unsigned char *linear(double **w, unsigned char *x, double *b, int input, int output) // w: weight layer, x: input layer, b: bias layer, input: x의 node 개수, output: 출력되는 node 개수
+{
+    unsigned char *z = (unsigned char *)malloc(sizeof(unsigned char) * output); // z 연산 결과 저장 배열
+    for (int i = 0; i < output; i++)
+    {
+        z[i] = 0; // 0으로 배열 초기화
+    }
+
+    for (int i = 0; i < output; i++)
+    {
+        for (int j = 0; j < input; j++)
+        {
+            z[i] += w[i][j] * x[j] + b[i]; // 역전파 계산
+        }
+    }
+
+    return z;
+}
+
 int main()
 {
     srand(time(NULL)); // 난수 초기화
     ////////////////////////// 이미지, 라벨 데이터 입력 ////////////////////////////
-    FILE *img = fopen("t10k-images.idx3-ubyte", "rb");   // MNIST 이미지 데이터 입력
-    FILE *label = fopen("t10k-labels.idx1-ubyte", "rb"); // MNIST 라벨 데이터 입력
+    FILE *img = fopen("train-images.idx3-ubyte", "rb");   // MNIST 이미지 데이터 입력
+    FILE *label = fopen("train-labels.idx1-ubyte", "rb"); // MNIST 라벨 데이터 입력
 
     // 변수값 선언 및 초기화
     int dataMagicNumber, labelMagicNumber, imgCount, labelCount, imgWidth, imgHeight = 0;
@@ -66,10 +148,11 @@ int main()
     int imgSize = imgWidth * imgHeight; // 이미지 크기 저장
     int batchSize = 30;                 // 사용할 이미지 개수
     int labelSize = 10;                 // 라벨 데이터 개수(0~9로 10개)
+
+    printf("Train 이미지 개수 출력 : %d\n", imgCount); // Train 이미지 개수 출력
     ////////////////////////////////////////////////////////////////////////////
 
     //////////////////////// 이미지, 라벨 데이터 전처리 //////////////////////////
-
     // 이미지 데이터 저장 배열 생성
     unsigned char **imgBuffer = (unsigned char **)malloc(sizeof(unsigned char *) * batchSize);
     for (int i = 0; i < batchSize; i++)
@@ -138,27 +221,15 @@ int main()
     int hiddenLayer2Count = 256; // 은닉층2 뉴런 개수
     int outputLayerCount = 10;   // 출력층 뉴런 개수
 
-    // 가중치 레이어1 512 * 784 배열 동적 할당
-    double **weightLayer1 = (double **)malloc(sizeof(double *) * hiddenLayer1Count);
-    for (int i = 0; i < hiddenLayer1Count; i++)
-    {
-        weightLayer1[i] = (double *)malloc(sizeof(double) * (imgWidth * imgHeight));
-    }
+    double **weightLayer1 = createWeightLayer(imgSize, hiddenLayer1Count);           // weight layer 1(512 * 784) 생성
+    double **weightLayer2 = createWeightLayer(hiddenLayer1Count, hiddenLayer2Count); // weight layer 2(256 * 512) 생성
+    double **weightLayer3 = createWeightLayer(hiddenLayer2Count, outputLayerCount);  // weight layer 3(10 * 256) 생성
 
-    // 가중치 레이어1 Xavier's uniform distribution으로 초기화
-    double n1_input = (double)(imgWidth * imgHeight);   // 784
-    double n1_output = (double)hiddenLayer1Count;       // 512
-    double limit1 = sqrt(6.0 / (n1_input + n1_output)); // Xavier 초기화의 범위
+    double *biasLayer1 = createBiasLayer(imgSize, hiddenLayer1Count);           // bias layer 1(512 * 1) 생성
+    double *biasLayer2 = createBiasLayer(hiddenLayer1Count, hiddenLayer2Count); // bias layer 2(256 * 1) 생성
+    double *biasLayer3 = createBiasLayer(hiddenLayer2Count, outputLayerCount);  // bias layer 3(10 * 1) 생성
 
-    for (int i = 0; i < hiddenLayer1Count; i++)
-    {
-        for (int j = 0; j < (imgWidth * imgHeight); j++)
-        {
-            weightLayer1[i][j] = ((double)rand() / RAND_MAX) * (2.0 * limit1) - limit1; // Xavier 범위 내의 랜덤 weight 할당
-        }
-    }
-
-    // 가중치 레이어1 출력
+    // weight layer 1(512 * 784) 출력
     for (int i = 0; i < 5; i++)
     {
         for (int j = 0; j < 5; j++)
@@ -167,27 +238,7 @@ int main()
         }
     }
 
-    // 가중치 레이어2 256 * 512 배열 동적 할당
-    double **weightLayer2 = (double **)malloc(sizeof(double *) * hiddenLayer2Count);
-    for (int i = 0; i < hiddenLayer2Count; i++)
-    {
-        weightLayer2[i] = (double *)malloc(sizeof(double) * hiddenLayer1Count);
-    }
-
-    // 가중치 레이어2 Xavier's uniform distribution으로 초기화
-    double n2_input = (double)hiddenLayer1Count;        // 512
-    double n2_output = (double)hiddenLayer2Count;       // 256
-    double limit2 = sqrt(6.0 / (n2_input + n2_output)); // Xavier 초기화의 범위
-
-    for (int i = 0; i < hiddenLayer2Count; i++)
-    {
-        for (int j = 0; j < hiddenLayer1Count; j++)
-        {
-            weightLayer2[i][j] = ((double)rand() / RAND_MAX) * (2.0 * limit2) - limit2; // Xavier 범위 내의 랜덤 weight 할당
-        }
-    }
-
-    // 가중치 레이어2 출력
+    // weight layer 2(256 * 512) 출력
     for (int i = 0; i < 5; i++)
     {
         for (int j = 0; j < 5; j++)
@@ -196,27 +247,7 @@ int main()
         }
     }
 
-    // 가중치 레이어3 10 * 256 배열 동적 할당
-    double **weightLayer3 = (double **)malloc(sizeof(double *) * outputLayerCount);
-    for (int i = 0; i < outputLayerCount; i++)
-    {
-        weightLayer3[i] = (double *)malloc(sizeof(double) * hiddenLayer2Count);
-    }
-
-    // 가중치 레이어3 Xavier's uniform distribution으로 초기화
-    double n3_input = (double)hiddenLayer2Count;        // 256
-    double n3_output = (double)outputLayerCount;        // 10
-    double limit3 = sqrt(6.0 / (n3_input + n3_output)); // Xavier 초기화의 범위
-
-    for (int i = 0; i < outputLayerCount; i++)
-    {
-        for (int j = 0; j < hiddenLayer2Count; j++)
-        {
-            weightLayer3[i][j] = ((double)rand() / RAND_MAX) * (2.0 * limit3) - limit3; // Xavier 범위 내의 랜덤 weight 할당
-        }
-    }
-
-    // 가중치 레이어3 출력
+    // weight layer 3(10 * 256) 출력
     for (int i = 0; i < 5; i++)
     {
         for (int j = 0; j < 5; j++)
@@ -225,37 +256,50 @@ int main()
         }
     }
 
-    // 편향 행렬1 512 * 1 동적 할당
+    // bias layer 1(512 * 1) 출력
+    for (int i = 0; i < 5; i++)
+    {
+        printf("bias - hidden layer 1[%d] : %.4f\n", i, biasLayer1[i]);
+    }
 
-    // 편향 행렬1 Xavier's uniform distribution으로 초기화
+    // bias layer 2(256 * 1) 출력
+    for (int i = 0; i < 5; i++)
+    {
+        printf("bias - hidden layer 2[%d] : %.4f\n", i, biasLayer2[i]);
+    }
 
-    // 편향 행렬1 출력
-
-    // 편향 행렬2 256 * 1 동적 할당
-
-    // 편향 행렬2 Xavier's uniform distribution으로 초기화
-
-    // 편향 행렬2 출력
-
-    // 편향 행렬3 10 * 1 동적 할당
-
-    // 편향 행렬3 Xavier's uniform distribution으로 초기화
-
-    // 편향 행렬3 출력
+    // bias layer 3(10 * 1) 출력
+    for (int i = 0; i < 5; i++)
+    {
+        printf("bias - output layer[%d] : %.4f\n", i, biasLayer3[i]);
+    }
 
     ////////////////////////////////////////////////////////////////////////////
 
     ///////////////////// Forward Propagation(순전파) 연산 //////////////////////
     /*
-    1. hidden layer 1 512 * 1 동적 할당
-    2. z1 = weight layer 1 * imgBuffer[0] + bias 1 계산
-    3. a1 = sigmoid * z1 계산
-    4. z2 = weight layer 2 * a1 + bias 2 계산
-    5. a2 = sigmoid * z2 계산
-    6. z3 = weight layer 3 * a2 + bias 3 계산
-    7. a3 = softmax * z3 계산
-    8. 함수화 하면서 리팩토링
+    1. z1 = weight layer 1 * imgBuffer[0] + bias 1 계산
+    2. a1 = sigmoid * z1 계산
+    3. z2 = weight layer 2 * a1 + bias 2 계산
+    4. a2 = sigmoid * z2 계산
+    5. z3 = weight layer 3 * a2 + bias 3 계산
+    6. a3 = softmax * z3 계산
+    7. 함수화 하면서 리팩토링
     */
+
+    // 1. z1 = weight layer 1 * imgBuffer[0] + bias 1 계산
+    double *z1 = linear(weightLayer1, imgBuffer[0], biasLayer1, imgSize, hiddenLayer1Count);
+    double *a1 = activate(z1, hiddenLayer1Count, sigmoid);
+
+    for (int i = 0; i < hiddenLayer1Count; i++)
+    {
+        printf("z1[%d] : %.4f\n", i, z1[i]);
+    }
+    for (int i = 0; i < hiddenLayer1Count; i++)
+    {
+        printf("a1[%d] : %.4f\n", i, a1[i]);
+    }
+
     ////////////////////////////////////////////////////////////////////////////
 
     ///////////////////// Back Propagation(역전파) 연산 //////////////////////
@@ -284,6 +328,25 @@ int main()
     for (int i = 0; i < batchSize; i++)
         free(labelBuffer[i]);
     free(labelBuffer);
+
+    for (int i = 0; i < hiddenLayer1Count; i++)
+        free(weightLayer1[i]);
+    free(weightLayer1);
+
+    for (int i = 0; i < hiddenLayer2Count; i++)
+        free(weightLayer2[i]);
+    free(weightLayer2);
+
+    for (int i = 0; i < outputLayerCount; i++)
+        free(weightLayer3[i]);
+    free(weightLayer3);
+
+    free(biasLayer1);
+    free(biasLayer2);
+    free(biasLayer3);
+
+    free(z1);
+    free(a1);
 
     fclose(img);
     fclose(label);
