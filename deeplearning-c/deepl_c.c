@@ -176,7 +176,7 @@ double *createHiddenDelta(double *z, double *next, double **w, int currSize, int
         double sum = 0.0;
         for (int j = 0; j < nextSize; j++)
         {
-            sum += w[i][j] * next[j];
+            sum += w[j][i] * next[j];
         }
         d[i] = sum * sigmoid(z[i]) * (1 - sigmoid(z[i]));
     }
@@ -199,7 +199,7 @@ void backpropagation(double *x, double *delta, double **w, int inputSize, int de
         for (int j = 0; j < deltaSize; j++)
         {
             double dL_dw = delta[j] * x[i];
-            w[i][j] = gradientDescent(dL_dw, w[i][j], 0.01);
+            w[j][i] = gradientDescent(dL_dw, w[j][i], 0.01);
         }
     }
 }
