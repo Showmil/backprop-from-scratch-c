@@ -4,6 +4,9 @@
 #include <time.h>   // 시간 관련 함수
 
 #define ANSI_RESET "\033[0m"
+#define BATCH_SIZE 100     // batch 크기
+#define EPOCH_SIZE 100     // epoch 크기
+#define LEARNING_RATE 0.01 // 학습률 크기
 
 /*
 Deep Learning Information
@@ -222,23 +225,19 @@ int main()
     imgHeight = reverseInt(imgHeight);            // 변수에 세로 크기 할당
 
     int imgSize = imgWidth * imgHeight; // 이미지 크기 저장
-    int batchSize = 30;                 // 사용할 이미지 개수
     int labelSize = 10;                 // 라벨 데이터 개수(0~9로 10개)
-    double learningRate = 0.01;            // 학습률
-
-    printf("Train 이미지 개수 출력 : %d\n", imgCount); // Train 이미지 개수 출력
     ////////////////////////////////////////////////////////////////////////////
 
     //////////////////////// 이미지, 라벨 데이터 전처리 //////////////////////////
     // 이미지 데이터 저장 배열 생성
-    unsigned char **imgBuffer = (unsigned char **)malloc(sizeof(unsigned char *) * batchSize);
-    for (int i = 0; i < batchSize; i++)
+    unsigned char **imgBuffer = (unsigned char **)malloc(sizeof(unsigned char *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
     { // 784개의 개별 이미지 픽셀 정보를 저장할 배열 동적 할당
         imgBuffer[i] = (unsigned char *)malloc(sizeof(unsigned char) * imgSize);
     }
 
     // 이미지 데이터 픽셀 정보들을 배열에 저장
-    for (int i = 0; i < batchSize; i++)
+    for (int i = 0; i < BATCH_SIZE; i++)
     {
         fread(imgBuffer[i], sizeof(unsigned char), imgSize, img);
     }
@@ -262,34 +261,40 @@ int main()
     }
 
     // 라벨 데이터 저장 배열 생성
-    unsigned char **labelData = (unsigned char **)malloc(sizeof(unsigned char *) * batchSize);
-    for (int i = 0; i < batchSize; i++)
+    unsigned char **labelData = (unsigned char **)malloc(sizeof(unsigned char *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
     { // 10개의 라벨 데이터 정보를 저장할 배열 동적 할당
         labelData[i] = (unsigned char *)malloc(sizeof(unsigned char) * labelSize);
     }
 
     unsigned char tempLabel = 0; // 파일에서 읽어올 1바이트 분량의 임시 변수
     // 파일에서 실제 정답 라벨 1개를 읽기
-    fread(&tempLabel, sizeof(unsigned char), 1, label);
     // One-Hot Encoding 변환
-    for (int j = 0; j < 10; j++)
+    for (int i = 0; i < BATCH_SIZE; i++)
     {
-        if (j == tempLabel)
+        fread(&tempLabel, sizeof(unsigned char), 1, label);
+        for (int j = 0; j < labelSize; j++)
         {
-            labelData[0][j] = 1; // 정답 인덱스에는 1
-        }
-        else
-        {
-            labelData[0][j] = 0; // 나머지 인덱스에는 0
+            if (j == tempLabel)
+            {
+                labelData[i][j] = 1; // 정답 인덱스에는 1
+            }
+            else
+            {
+                labelData[i][j] = 0; // 나머지 인덱스에는 0
+            }
         }
     }
 
     // 라벨 데이터 출력
-    for (int k = 0; k < labelSize; k++)
+    for (int i = 0; i < BATCH_SIZE; i++)
     {
-        printf("%d ", labelData[0][k]);
+        for (int k = 0; k < labelSize; k++)
+        {
+            printf("%d ", labelData[i][k]);
+        }
+        printf("\n");
     }
-    printf("\n");
     ////////////////////////////////////////////////////////////////////////////
 
     //////////////////////// 가중치, 편향 행렬 생성 및 초기화 //////////////////////////
@@ -298,13 +303,13 @@ int main()
     int hiddenLayer2Count = 256; // 은닉층2 뉴런 개수
     int outputLayerCount = 10;   // 출력층 뉴런 개수
 
-    double **inputLayer = (double **)malloc(sizeof(double *) * batchSize);
-    for (int i = 0; i < batchSize; i++)
+    double **inputLayer = (double **)malloc(sizeof(double *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
     {
         inputLayer[i] = (double *)malloc(sizeof(double) * imgSize);
     }
 
-    for (int i = 0; i < batchSize; i++) // Input Layer가 unsigned char형이라 double로 전처리
+    for (int i = 0; i < BATCH_SIZE; i++) // Input Layer가 unsigned char형이라 double로 전처리
     {
         for (int j = 0; j < imgSize; j++)
         {
@@ -319,48 +324,20 @@ int main()
     double *biasLayer1 = createBiasLayer(imgSize, hiddenLayer1Count);           // bias layer 1(512 * 1) 생성
     double *biasLayer2 = createBiasLayer(hiddenLayer1Count, hiddenLayer2Count); // bias layer 2(256 * 1) 생성
     double *biasLayer3 = createBiasLayer(hiddenLayer2Count, outputLayerCount);  // bias layer 3(10 * 1) 생성
-
-    // weight layer 1(512 * 784) 출력
-    for (int i = 0; i < 2; i++)
-    {
-        for (int j = 0; j < 2; j++)
-        {
-            printf("weight(input node[%d] -> hidden layer 1[%d]) : %.8f\n", j, i, weightLayer1[i][j]);
-        }
-    }
-
-    // weight layer 2(256 * 512) 출력
-    for (int i = 0; i < 2; i++)
-    {
-        for (int j = 0; j < 2; j++)
-        {
-            printf("weight(hidden layer 1[%d] -> hidden layer 2[%d]) : %.8f\n", j, i, weightLayer2[i][j]);
-        }
-    }
-
-    // weight layer 3(10 * 256) 출력
-    for (int i = 0; i < 2; i++)
-    {
-        for (int j = 0; j < 2; j++)
-        {
-            printf("weight(hidden layer 2[%d] -> output layer[%d]) : %.8f\n", j, i, weightLayer3[i][j]);
-        }
-    }
-
     ////////////////////////////////////////////////////////////////////////////
 
     ///////////////////// Forward Propagation(순전파) 연산 //////////////////////
     // 1. z1 = weight layer 1 * imgBuffer[0] + bias 1 계산
     double *z1 = linear(weightLayer1, inputLayer[0], biasLayer1, imgSize, hiddenLayer1Count);
-    // 2. a1 = sigmoid * z1 계산
+    // 2. a1 = sigmoid(z1) 계산
     double *a1 = activate(z1, hiddenLayer1Count, sigmoid);
     // 3. z2 = weight layer 2 * a1 + bias 2 계산
     double *z2 = linear(weightLayer2, a1, biasLayer2, hiddenLayer1Count, hiddenLayer2Count);
-    // 4. a2 = sigmoid * z2 계산
+    // 4. a2 = sigmoid(z2) 계산
     double *a2 = activate(z2, hiddenLayer2Count, sigmoid);
     // 5. z3 = weight layer 3 * a2 + bias 3 계산
     double *z3 = linear(weightLayer3, a2, biasLayer3, hiddenLayer2Count, outputLayerCount);
-    // 6. a3 = softmax * z3 계산
+    // 6. a3 = softmax(z3) 계산
     double *a3 = softmax(z3, outputLayerCount);
     ////////////////////////////////////////////////////////////////////////////
 
@@ -369,51 +346,41 @@ int main()
     double *hiddenLayer2Delta = createHiddenDelta(z2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
     double *hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
 
-    backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount, biasLayer3, learningRate);
-    backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count, biasLayer2, learningRate);
-    backpropagation(inputLayer[0], hiddenLayer1Delta, weightLayer1, imgSize, hiddenLayer1Count, biasLayer1, learningRate);
-
-    // weight layer 1(512 * 784) 출력
-    printf("--------------------------Backpropagation------------------------------------\n");
-    for (int i = 0; i < 2; i++)
-    {
-        for (int j = 0; j < 2; j++)
-        {
-            printf("weight(input node[%d] -> hidden layer 1[%d]) : %.8f\n", j, i, weightLayer1[i][j]);
-        }
-    }
-
-    // weight layer 2(256 * 512) 출력
-    for (int i = 0; i < 2; i++)
-    {
-        for (int j = 0; j < 2; j++)
-        {
-            printf("weight(hidden layer 1[%d] -> hidden layer 2[%d]) : %.8f\n", j, i, weightLayer2[i][j]);
-        }
-    }
-
-    // weight layer 3(10 * 256) 출력
-    for (int i = 0; i < 2; i++)
-    {
-        for (int j = 0; j < 2; j++)
-        {
-            printf("weight(hidden layer 2[%d] -> output layer[%d]) : %.8f\n", j, i, weightLayer3[i][j]);
-        }
-    }
-    ////////////////////////////////////////////////////////////////////////////
-
-    /////////////// 나머지 9999개의 이미지 행렬화 해서 빠르게 연산 ////////////////
-
+    backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount, biasLayer3, LEARNING_RATE);
+    backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count, biasLayer2, LEARNING_RATE);
+    backpropagation(inputLayer[0], hiddenLayer1Delta, weightLayer1, imgSize, hiddenLayer1Count, biasLayer1, LEARNING_RATE);
     ////////////////////////////////////////////////////////////////////////////
 
     ////////////////////// 테스트 데이터셋 이용해서 테스트 ///////////////////////
+    FILE *testImg = fopen("t10k-images.idx3-ubyte", "rb");   // MNIST 테스트 이미지 데이터 입력
+    FILE *testLabel = fopen("t10k-labels.idx1-ubyte", "rb"); // MNIST 테스트 라벨 데이터 입력
+
+    // 테스트 데이터 변수값 선언 및 초기화
+    int testDataMagicNumber, testLabelMagicNumber, testImgCount, testLabelCount, testImgWidth, testImgHeight = 0;
+
+    fread(&testDataMagicNumber, sizeof(testDataMagicNumber), 1, testImg); // 매직넘버 추출
+    fread(&testLabelMagicNumber, sizeof(testLabelMagicNumber), 1, testLabel);
+    testDataMagicNumber = reverseInt(testDataMagicNumber);
+    testLabelMagicNumber = reverseInt(testLabelMagicNumber);
+
+    fread(&testImgCount, sizeof(testImgCount), 1, testImg);       // 데이터 개수 추출
+    fread(&testLabelCount, sizeof(testLabelCount), 1, testLabel); // 라벨 데이터의 개수 추출
+    testImgCount = reverseInt(testImgCount);
+
+    fread(&testImgWidth, sizeof(testImgWidth), 1, testImg); // 가로 크기 추출
+    testImgWidth = reverseInt(testImgWidth);
+
+    fread(&testImgHeight, sizeof(testImgHeight), 1, testImg); // 세로 크기 추출
+    testImgHeight = reverseInt(testImgHeight);
+
+    int testImgSize = testImgWidth * testImgHeight; // 이미지 크기 저장
 
     ////////////////////////////// 메모리 해제 //////////////////////////////////
-    for (int i = 0; i < batchSize; i++)
+    for (int i = 0; i < BATCH_SIZE; i++)
         free(imgBuffer[i]);
     free(imgBuffer);
 
-    for (int i = 0; i < batchSize; i++)
+    for (int i = 0; i < BATCH_SIZE; i++)
         free(labelData[i]);
     free(labelData);
 
