@@ -129,14 +129,10 @@ double *linear(double **w, double *x, double *b, int input, int output) // w: we
     double *z = (double *)malloc(sizeof(double) * output); // z 연산 결과 저장 배열
     for (int i = 0; i < output; i++)
     {
-        z[i] = 0; // 0으로 배열 초기화
-    }
-
-    for (int i = 0; i < output; i++)
-    {
+        z[i] = b[i]; // 편향 더해놓기
         for (int j = 0; j < input; j++)
         {
-            z[i] += w[i][j] * x[j] + b[i]; // 역전파 계산
+            z[i] += w[i][j] * x[j]; // 역전파 계산
         }
     }
 
@@ -149,8 +145,6 @@ double *createOutputDelta(unsigned char *y, double *a, int size) // y: 정답값
     double *d = (double *)malloc(sizeof(double) * size);
     for (int i = 0; i < size; i++)
     {
-        printf("y[%d] : %d\n", i, y[i]);
-        printf("a[%d] : %.4f\n", i, a[i]);
         d[i] = a[i] - (double)y[i];
     }
     return d;
@@ -181,16 +175,23 @@ double gradientDescent(double dL_dw, double w, double n)
 }
 
 // 역전파 계산 함수
-void backpropagation(double *x, double *delta, double **w, int inputSize, int deltaSize)
+void backpropagation(double *x, double *delta, double **w, int inputSize, int deltaSize, double *b, double learningRate)
 // x: 입력값, delta: 델타값, w: 가중치 배열
 {
     for (int i = 0; i < inputSize; i++)
+    // 가중치 업데이트
     {
         for (int j = 0; j < deltaSize; j++)
         {
             double dL_dw = delta[j] * x[i];
-            w[j][i] = gradientDescent(dL_dw, w[j][i], 0.01);
+            w[j][i] = gradientDescent(dL_dw, w[j][i], learningRate);
         }
+    }
+
+    for (int i = 0; i < deltaSize; i++)
+    // 편향 업데이트
+    {
+        b[i] = b[i] - (learningRate * delta[i]);
     }
 }
 
@@ -223,6 +224,7 @@ int main()
     int imgSize = imgWidth * imgHeight; // 이미지 크기 저장
     int batchSize = 30;                 // 사용할 이미지 개수
     int labelSize = 10;                 // 라벨 데이터 개수(0~9로 10개)
+    double learningRate = 0.01;            // 학습률
 
     printf("Train 이미지 개수 출력 : %d\n", imgCount); // Train 이미지 개수 출력
     ////////////////////////////////////////////////////////////////////////////
@@ -323,7 +325,7 @@ int main()
     {
         for (int j = 0; j < 2; j++)
         {
-            printf("weight(input node[%d] -> hidden layer 1[%d]) : %.4f\n", j, i, weightLayer1[i][j]);
+            printf("weight(input node[%d] -> hidden layer 1[%d]) : %.8f\n", j, i, weightLayer1[i][j]);
         }
     }
 
@@ -332,7 +334,7 @@ int main()
     {
         for (int j = 0; j < 2; j++)
         {
-            printf("weight(hidden layer 1[%d] -> hidden layer 2[%d]) : %.4f\n", j, i, weightLayer2[i][j]);
+            printf("weight(hidden layer 1[%d] -> hidden layer 2[%d]) : %.8f\n", j, i, weightLayer2[i][j]);
         }
     }
 
@@ -341,29 +343,9 @@ int main()
     {
         for (int j = 0; j < 2; j++)
         {
-            printf("weight(hidden layer 2[%d] -> output layer[%d]) : %.4f\n", j, i, weightLayer3[i][j]);
+            printf("weight(hidden layer 2[%d] -> output layer[%d]) : %.8f\n", j, i, weightLayer3[i][j]);
         }
     }
-
-    /*
-    // bias layer 1(512 * 1) 출력
-    for (int i = 0; i < 5; i++)
-    {
-        printf("bias - hidden layer 1[%d] : %.4f\n", i, biasLayer1[i]);
-    }
-
-    // bias layer 2(256 * 1) 출력
-    for (int i = 0; i < 5; i++)
-    {
-        printf("bias - hidden layer 2[%d] : %.4f\n", i, biasLayer2[i]);
-    }
-
-    // bias layer 3(10 * 1) 출력
-    for (int i = 0; i < 5; i++)
-    {
-        printf("bias - output layer[%d] : %.4f\n", i, biasLayer3[i]);
-    }
-    */
 
     ////////////////////////////////////////////////////////////////////////////
 
@@ -380,62 +362,16 @@ int main()
     double *z3 = linear(weightLayer3, a2, biasLayer3, hiddenLayer2Count, outputLayerCount);
     // 6. a3 = softmax * z3 계산
     double *a3 = softmax(z3, outputLayerCount);
-
-    /*
-    for (int i = 0; i < 5; i++)
-    {
-        printf("z1[%d] : %.4f\n", i, z1[i]);
-    }
-    for (int i = 0; i < 5; i++)
-    {
-        printf("a1[%d] : %.4f\n", i, a1[i]);
-    }
-    for (int i = 0; i < 5; i++)
-    {
-        printf("z2[%d] : %.4f\n", i, z2[i]);
-    }
-    for (int i = 0; i < 5; i++)
-    {
-        printf("a2[%d] : %.4f\n", i, a2[i]);
-    }
-    for (int i = 0; i < 5; i++)
-    {
-        printf("z3[%d] : %.4f\n", i, z3[i]);
-    }
-    for (int i = 0; i < 10; i++)
-    {
-        printf("a3[%d] : %.4f\n", i, a3[i]);
-    }
-    */
-
     ////////////////////////////////////////////////////////////////////////////
 
     ///////////////////// Back Propagation(역전파) 연산 ////////////////////////
-    // printf("--------------------------delta------------------------------------\n");
-
     double *outputDelta = createOutputDelta(labelData[0], a3, outputLayerCount);
     double *hiddenLayer2Delta = createHiddenDelta(z2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
     double *hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
 
-    for (int i = 0; i < 10; i++)
-    {
-        printf("outputDelta[%d] : %.4f\n", i, outputDelta[i]);
-
-    }
-    for (int i = 0; i < 4; i++)
-    {
-        printf("hiddenLayer2Delta[%d] : %.4f\n", i, hiddenLayer2Delta[i]);
-        
-    }
-    for (int i = 0; i < 4; i++)
-    {
-        printf("hiddenLayer1Delta[%d] : %.4f\n", i, hiddenLayer1Delta[i]);
-        
-    }
-
-    backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
-    backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
-    backpropagation(inputLayer[0], hiddenLayer1Delta, weightLayer1, imgSize, hiddenLayer1Count);
+    backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount, biasLayer3, learningRate);
+    backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count, biasLayer2, learningRate);
+    backpropagation(inputLayer[0], hiddenLayer1Delta, weightLayer1, imgSize, hiddenLayer1Count, biasLayer1, learningRate);
 
     // weight layer 1(512 * 784) 출력
     printf("--------------------------Backpropagation------------------------------------\n");
@@ -443,7 +379,7 @@ int main()
     {
         for (int j = 0; j < 2; j++)
         {
-            printf("weight(input node[%d] -> hidden layer 1[%d]) : %.4f\n", j, i, weightLayer1[i][j]);
+            printf("weight(input node[%d] -> hidden layer 1[%d]) : %.8f\n", j, i, weightLayer1[i][j]);
         }
     }
 
@@ -452,7 +388,7 @@ int main()
     {
         for (int j = 0; j < 2; j++)
         {
-            printf("weight(hidden layer 1[%d] -> hidden layer 2[%d]) : %.4f\n", j, i, weightLayer2[i][j]);
+            printf("weight(hidden layer 1[%d] -> hidden layer 2[%d]) : %.8f\n", j, i, weightLayer2[i][j]);
         }
     }
 
@@ -461,10 +397,9 @@ int main()
     {
         for (int j = 0; j < 2; j++)
         {
-            printf("weight(hidden layer 2[%d] -> output layer[%d]) : %.4f\n", j, i, weightLayer3[i][j]);
+            printf("weight(hidden layer 2[%d] -> output layer[%d]) : %.8f\n", j, i, weightLayer3[i][j]);
         }
     }
-
     ////////////////////////////////////////////////////////////////////////////
 
     /////////////// 나머지 9999개의 이미지 행렬화 해서 빠르게 연산 ////////////////
@@ -504,6 +439,10 @@ int main()
     free(a2);
     free(z3);
     free(a3);
+
+    free(outputDelta);
+    free(hiddenLayer2Delta);
+    free(hiddenLayer1Delta);
 
     fclose(img);
     fclose(label);
