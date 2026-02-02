@@ -143,25 +143,15 @@ double *linear(double **w, double *x, double *b, int input, int output) // w: we
     return z;
 }
 
-// cross-entropy 손실 함수
-double crossEntropy(double *a, int size, unsigned char *y) // a: 예측값 배열, size: 클래스 개수, y: 실제값 배열
-{
-    double sum = 0.0;
-    for (int i = 0; i < size; i++)
-    {
-        sum += y[i] * log10(a[i]);
-    }
-
-    return -sum;
-}
-
 // 출력층 노드 delta 함수
 double *createOutputDelta(unsigned char *y, double *a, int size) // y: 정답값, a: 출력층 예측값
 {
     double *d = (double *)malloc(sizeof(double) * size);
     for (int i = 0; i < size; i++)
     {
-        d[i] = -(y[i] * (1 - a[i]));
+        printf("y[%d] : %d\n", i, y[i]);
+        printf("a[%d] : %.4f\n", i, a[i]);
+        d[i] = a[i] - (double)y[i];
     }
     return d;
 }
@@ -329,32 +319,33 @@ int main()
     double *biasLayer3 = createBiasLayer(hiddenLayer2Count, outputLayerCount);  // bias layer 3(10 * 1) 생성
 
     // weight layer 1(512 * 784) 출력
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 2; i++)
     {
-        for (int j = 0; j < 5; j++)
+        for (int j = 0; j < 2; j++)
         {
             printf("weight(input node[%d] -> hidden layer 1[%d]) : %.4f\n", j, i, weightLayer1[i][j]);
         }
     }
 
     // weight layer 2(256 * 512) 출력
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 2; i++)
     {
-        for (int j = 0; j < 5; j++)
+        for (int j = 0; j < 2; j++)
         {
             printf("weight(hidden layer 1[%d] -> hidden layer 2[%d]) : %.4f\n", j, i, weightLayer2[i][j]);
         }
     }
 
     // weight layer 3(10 * 256) 출력
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 2; i++)
     {
-        for (int j = 0; j < 5; j++)
+        for (int j = 0; j < 2; j++)
         {
             printf("weight(hidden layer 2[%d] -> output layer[%d]) : %.4f\n", j, i, weightLayer3[i][j]);
         }
     }
 
+    /*
     // bias layer 1(512 * 1) 출력
     for (int i = 0; i < 5; i++)
     {
@@ -372,6 +363,7 @@ int main()
     {
         printf("bias - output layer[%d] : %.4f\n", i, biasLayer3[i]);
     }
+    */
 
     ////////////////////////////////////////////////////////////////////////////
 
@@ -388,9 +380,6 @@ int main()
     double *z3 = linear(weightLayer3, a2, biasLayer3, hiddenLayer2Count, outputLayerCount);
     // 6. a3 = softmax * z3 계산
     double *a3 = softmax(z3, outputLayerCount);
-
-    // 7. 손실 함수를 통한 오차 계산
-    double loss = crossEntropy(a3, outputLayerCount, labelData[0]);
 
     /*
     for (int i = 0; i < 5; i++)
@@ -417,25 +406,32 @@ int main()
     {
         printf("a3[%d] : %.4f\n", i, a3[i]);
     }
-    printf("loss: %.4f\n", loss);
     */
 
     ////////////////////////////////////////////////////////////////////////////
 
-    ///////////////////// Back Propagation(역전파) 연산 //////////////////////
-    /*
-    1. output layer의 delta(앞으로는 줄여서 d라고 호칭)값 순서대로 d0~d9까지 계산
-    2. hidden layer 2 d0~d256 계산
-    3. hidden layer 1 d0~d512 계산
-    4. hidden layer 2 ~ output layer 간 weight 업데이트
-    5. hidden layer 2 ~ hidden layer 1 간 weight 업데이트
-    6. hidden layer 1 ~ input layer 간 weight 업데이트
-    7. 함수화 하면서 리팩토링
-    */
+    ///////////////////// Back Propagation(역전파) 연산 ////////////////////////
+    // printf("--------------------------delta------------------------------------\n");
 
     double *outputDelta = createOutputDelta(labelData[0], a3, outputLayerCount);
     double *hiddenLayer2Delta = createHiddenDelta(z2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
-    double *hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer1Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
+    double *hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
+
+    for (int i = 0; i < 10; i++)
+    {
+        printf("outputDelta[%d] : %.4f\n", i, outputDelta[i]);
+
+    }
+    for (int i = 0; i < 4; i++)
+    {
+        printf("hiddenLayer2Delta[%d] : %.4f\n", i, hiddenLayer2Delta[i]);
+        
+    }
+    for (int i = 0; i < 4; i++)
+    {
+        printf("hiddenLayer1Delta[%d] : %.4f\n", i, hiddenLayer1Delta[i]);
+        
+    }
 
     backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
     backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
@@ -443,27 +439,27 @@ int main()
 
     // weight layer 1(512 * 784) 출력
     printf("--------------------------Backpropagation------------------------------------\n");
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 2; i++)
     {
-        for (int j = 0; j < 5; j++)
+        for (int j = 0; j < 2; j++)
         {
             printf("weight(input node[%d] -> hidden layer 1[%d]) : %.4f\n", j, i, weightLayer1[i][j]);
         }
     }
 
     // weight layer 2(256 * 512) 출력
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 2; i++)
     {
-        for (int j = 0; j < 5; j++)
+        for (int j = 0; j < 2; j++)
         {
             printf("weight(hidden layer 1[%d] -> hidden layer 2[%d]) : %.4f\n", j, i, weightLayer2[i][j]);
         }
     }
 
     // weight layer 3(10 * 256) 출력
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 2; i++)
     {
-        for (int j = 0; j < 5; j++)
+        for (int j = 0; j < 2; j++)
         {
             printf("weight(hidden layer 2[%d] -> output layer[%d]) : %.4f\n", j, i, weightLayer3[i][j]);
         }
