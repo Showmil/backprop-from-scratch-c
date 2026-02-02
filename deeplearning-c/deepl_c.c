@@ -4,7 +4,7 @@
 #include <time.h>   // 시간 관련 함수
 
 #define ANSI_RESET "\033[0m"
-#define BATCH_SIZE 100     // batch 크기
+#define BATCH_SIZE 64      // batch 크기
 #define EPOCH_SIZE 100     // epoch 크기
 #define LEARNING_RATE 0.01 // 학습률 크기
 
@@ -26,6 +26,99 @@ weight layer 3 : 10 * 256 weights
 
 optimizer algorithm : Adam Optimizer
 */
+
+// 2차원 동적 할당 배열 메모리 초기화 함수
+void memoryFree(double **x, int n)
+{
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        free(x[i]);
+    }
+    free(x);
+}
+
+// 전체 이미지 데이터 저장함수
+unsigned char **allImgData(int size, int count, FILE *f)
+{
+    // size: 이미지 하나당 픽셀 수 (784), count: 전체 이미지 개수 (60000)
+    unsigned char **imgBuffer = (unsigned char **)malloc(sizeof(unsigned char *) * count);
+    for (int i = 0; i < count; i++)
+    {
+        imgBuffer[i] = (unsigned char *)malloc(sizeof(unsigned char) * size);
+    }
+
+    // 이미지 데이터 픽셀 정보들을 배열에 저장
+    for (int i = 0; i < count; i++)
+    {
+        fread(imgBuffer[i], sizeof(unsigned char), size, f);
+    }
+
+    // **imgBuffer가 아니라 포인터 변수 imgBuffer를 반환해야 함
+    return imgBuffer;
+}
+
+// 이미지 데이터 전처리 함수
+double **preprocessImgData(int size, int offset, unsigned char **imgData)
+// size: input 크기(784), offset: 현재 배치의 시작 인덱스
+{
+    double **inputLayer = (double **)malloc(sizeof(double *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        inputLayer[i] = (double *)malloc(sizeof(double) * size);
+    }
+
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        for (int j = 0; j < size; j++)
+        {
+            inputLayer[i][j] = (double)imgData[offset + i][j] / 255.0;
+        }
+    }
+
+    return inputLayer;
+}
+
+// 전체 라벨 데이터 저장 함수
+unsigned char **allLabelData(int count, FILE *f)
+{
+    unsigned char **LabelBuffer = (unsigned char **)malloc(sizeof(unsigned char *) * count);
+    for (int i = 0; i < count; i++)
+    {
+        LabelBuffer[i] = (unsigned char *)malloc(sizeof(unsigned char) * 1);
+        fread(LabelBuffer[i], sizeof(unsigned char), 1, f);
+    }
+
+    return LabelBuffer;
+}
+
+// 라벨 데이터 전처리 함수
+unsigned char **preprocessLabelData(int oneHotSize, int offset, unsigned char **allLabels)
+// oneHotSize: 라벨 클래스 개수(10), offset: 현재 배치 시작 인덱스, allLabels: 전체 라벨 데이터
+{
+    unsigned char **labelData = (unsigned char **)malloc(sizeof(unsigned char *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        labelData[i] = (unsigned char *)malloc(sizeof(unsigned char) * oneHotSize);
+    }
+
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        unsigned char correctLabel = allLabels[offset + i][0];
+        // One-Hot Encoding
+        for (int j = 0; j < oneHotSize; j++)
+        {
+            if (j == correctLabel)
+            {
+                labelData[i][j] = 1;
+            }
+            else
+            {
+                labelData[i][j] = 0;
+            }
+        }
+    }
+    return labelData;
+}
 
 // MNIST 데이터셋의 헤더 비트가 뒤집어져 있어서 이를 뒤집어 주는 함수
 int reverseInt(int i)
@@ -67,18 +160,25 @@ double **createWeightLayer(int input, int output)
 }
 
 // 편향 행렬 생성 및 초기화 함수
-double *createBiasLayer(int input, int output)
+double **createBiasLayer(int input, int output)
 {
     // 편향 행렬 동적 할당
-    double *layer = (double *)malloc(sizeof(double) * output);
+    double **layer = (double **)malloc(sizeof(double *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        layer[i] = (double *)malloc(sizeof(double) * output);
+    }
 
     // Xavier's uniform distribution 초기화 범위 계산
     double limit = sqrt(6.0 / ((double)input + (double)output));
 
     // Xavier 초기화
-    for (int i = 0; i < output; i++)
+    for (int k = 0; k < BATCH_SIZE; k++)
     {
-        layer[i] = ((double)rand() / RAND_MAX) * (2.0 * limit) - limit;
+        for (int i = 0; i < output; i++)
+        {
+            layer[k][i] = ((double)rand() / RAND_MAX) * (2.0 * limit) - limit;
+        }
     }
 
     return layer;
@@ -97,75 +197,124 @@ double sigmoidPrime(double n)
 }
 
 // softmax 함수
-double *softmax(double *z, int size)
+double **softmax(double **z, int size)
 {
-    double sum = 0.0;
-    double *a = (double *)malloc(sizeof(double) * size);
-
-    for (int i = 0; i < size; i++)
+    double **a = (double **)malloc(sizeof(double *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
     {
-        sum += exp(z[i]);
+        a[i] = (double *)malloc(sizeof(double) * size);
     }
 
-    for (int i = 0; i < size; i++)
+    for (int k = 0; k < BATCH_SIZE; k++)
     {
-        a[i] = exp(z[i]) / sum;
-    }
+        // 현재 배치에서 가장 큰 값 찾기
+        double max = z[k][0];
+        for (int i = 1; i < size; i++)
+        {
+            if (z[k][i] > max)
+                max = z[k][i];
+        }
 
+        // max를 빼서 exp 연산하여 오버플로우를 방지
+        double sum = 0.0;
+        for (int i = 0; i < size; i++)
+        {
+            // z값에서 max를 빼도 확률 비율은 동일하게 유지됨
+            a[k][i] = exp(z[k][i] - max);
+            sum += a[k][i];
+        }
+
+        // 3. 나누기
+        for (int i = 0; i < size; i++)
+        {
+            a[k][i] /= sum;
+        }
+    }
     return a;
 }
 
 // 활성화 함수
-double *activate(double *z, int size, double (*func)(double)) // z: 활성화 함수에 넣을 대상, size: z의 크기, func: 활성화 함수
+double **activate(double **z, int size, double (*func)(double)) // z: 활성화 함수에 넣을 대상, size: z의 크기, func: 활성화 함수
 {
-    double *a = (double *)malloc(sizeof(double) * size);
-    for (int i = 0; i < size; i++)
+    double **a = (double **)malloc(sizeof(double *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
     {
-        a[i] = func(z[i]);
+        a[i] = (double *)malloc(sizeof(double) * size);
+    }
+
+    for (int k = 0; k < BATCH_SIZE; k++)
+    {
+        for (int i = 0; i < size; i++)
+        {
+            a[k][i] = func(z[k][i]);
+        }
     }
     return a;
 }
 
 // 순전파 연산 함수
-double *linear(double **w, double *x, double *b, int input, int output) // w: weight layer, x: input layer, b: bias layer, input: x의 node 개수, output: 출력되는 node 개수
+double **linear(double **w, double **x, double **b, int input, int output) // w: weight layer, x: input layer, b: bias layer, input: x의 node 개수, output: 출력되는 node 개수
 {
-    double *z = (double *)malloc(sizeof(double) * output); // z 연산 결과 저장 배열
-    for (int i = 0; i < output; i++)
+    double **z = (double **)malloc(sizeof(double *) * BATCH_SIZE); // z 연산 결과 저장 배열
+    for (int i = 0; i < BATCH_SIZE; i++)
     {
-        z[i] = b[i]; // 편향 더해놓기
-        for (int j = 0; j < input; j++)
-        {
-            z[i] += w[i][j] * x[j]; // 역전파 계산
-        }
+        z[i] = (double *)malloc(sizeof(double) * output);
     }
 
+    for (int k = 0; k < BATCH_SIZE; k++)
+    {
+        for (int i = 0; i < output; i++)
+        {
+            z[k][i] = b[k][i]; // 편향 더해놓기
+            for (int j = 0; j < input; j++)
+            {
+                z[k][i] += w[i][j] * x[k][j]; // 역전파 계산
+            }
+        }
+    }
     return z;
 }
 
 // 출력층 노드 delta 함수
-double *createOutputDelta(unsigned char *y, double *a, int size) // y: 정답값, a: 출력층 예측값
+double **createOutputDelta(unsigned char **y, double **a, int size) // y: 정답값, a: 출력층 예측값
 {
-    double *d = (double *)malloc(sizeof(double) * size);
-    for (int i = 0; i < size; i++)
+    double **d = (double **)malloc(sizeof(double *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
     {
-        d[i] = a[i] - (double)y[i];
+        d[i] = (double *)malloc(sizeof(double) * size);
+    }
+
+    for (int k = 0; k < BATCH_SIZE; k++)
+    {
+        for (int i = 0; i < size; i++)
+        {
+            d[k][i] = a[k][i] - (double)y[k][i];
+        }
     }
     return d;
 }
 
 // 은닉층 노드 delta 함수
-double *createHiddenDelta(double *z, double *next, double **w, int currSize, int nextSize)
+double **createHiddenDelta(double **z, double **next, double **w, int currSize, int nextSize)
 // z: 현재 레이어의 z값 배열, next: 다음 레이어의 델타값 배열, w: 두 레이어를 잇는 가중치
 {
-    double *d = (double *)malloc(sizeof(double) * currSize);
-    for (int i = 0; i < currSize; i++)
+    double **d = (double **)malloc(sizeof(double *) * BATCH_SIZE);
+    for (int i = 0; i < BATCH_SIZE; i++)
     {
-        double sum = 0.0;
-        for (int j = 0; j < nextSize; j++)
+        d[i] = (double *)malloc(sizeof(double) * currSize);
+    }
+
+    for (int k = 0; k < BATCH_SIZE; k++)
+    {
+        for (int i = 0; i < currSize; i++)
         {
-            sum += w[j][i] * next[j];
+            double sum = 0.0;
+            for (int j = 0; j < nextSize; j++)
+            {
+                sum += w[j][i] * next[k][j];
+            }
+            d[k][i] = sum * sigmoid(z[k][i]) * (1 - sigmoid(z[k][i]));
         }
-        d[i] = sum * sigmoid(z[i]) * (1 - sigmoid(z[i]));
     }
     return d;
 }
@@ -178,23 +327,27 @@ double gradientDescent(double dL_dw, double w, double n)
 }
 
 // 역전파 계산 함수
-void backpropagation(double *x, double *delta, double **w, int inputSize, int deltaSize, double *b, double learningRate)
-// x: 입력값, delta: 델타값, w: 가중치 배열
+void backpropagation(double **x, double **delta, double **w, int inputSize, int deltaSize, double **b, double learningRate)
 {
-    for (int i = 0; i < inputSize; i++)
-    // 가중치 업데이트
+    for (int k = 0; k < BATCH_SIZE; k++)
     {
-        for (int j = 0; j < deltaSize; j++)
+        for (int i = 0; i < inputSize; i++)
         {
-            double dL_dw = delta[j] * x[i];
-            w[j][i] = gradientDescent(dL_dw, w[j][i], learningRate);
+            for (int j = 0; j < deltaSize; j++)
+            {
+                // 기울기를 BATCH_SIZE 로 나누어 평균을 구함
+                double dL_dw = (delta[k][j] * x[k][i]) / (double)BATCH_SIZE;
+                w[j][i] = gradientDescent(dL_dw, w[j][i], learningRate);
+            }
         }
     }
-
-    for (int i = 0; i < deltaSize; i++)
-    // 편향 업데이트
+    for (int k = 0; k < BATCH_SIZE; k++)
     {
-        b[i] = b[i] - (learningRate * delta[i]);
+        for (int i = 0; i < deltaSize; i++)
+        {
+            // 편향도 마찬가지로 나누기
+            b[k][i] -= (learningRate * delta[k][i]) / (double)BATCH_SIZE;
+        }
     }
 }
 
@@ -226,132 +379,75 @@ int main()
 
     int imgSize = imgWidth * imgHeight; // 이미지 크기 저장
     int labelSize = 10;                 // 라벨 데이터 개수(0~9로 10개)
-    ////////////////////////////////////////////////////////////////////////////
 
-    //////////////////////// 이미지, 라벨 데이터 전처리 //////////////////////////
-    // 이미지 데이터 저장 배열 생성
-    unsigned char **imgBuffer = (unsigned char **)malloc(sizeof(unsigned char *) * BATCH_SIZE);
-    for (int i = 0; i < BATCH_SIZE; i++)
-    { // 784개의 개별 이미지 픽셀 정보를 저장할 배열 동적 할당
-        imgBuffer[i] = (unsigned char *)malloc(sizeof(unsigned char) * imgSize);
-    }
-
-    // 이미지 데이터 픽셀 정보들을 배열에 저장
-    for (int i = 0; i < BATCH_SIZE; i++)
-    {
-        fread(imgBuffer[i], sizeof(unsigned char), imgSize, img);
-    }
-
-    // 이미지 데이터 출력
-    for (int y = 0; y < imgHeight; y++)
-    {
-        for (int x = 0; x < imgWidth; x++)
-        {
-            unsigned char pixel = imgBuffer[0][y * imgWidth + x]; // 현재 픽셀의 위치 정보
-            if (x < 2 || x >= imgWidth - 2)
-            {
-                printf(ANSI_RESET "  "); // 이미지 깨짐 문제 방지 위해 양 옆 2개의 픽셀 초기화
-            }
-            else
-            {
-                printf("\033[48;2;%d;%d;%dm  ", pixel, pixel, pixel); // 이미지 출력
-            }
-        }
-        printf(ANSI_RESET "\n"); // 줄바꾸면서 초기화
-    }
-
-    // 라벨 데이터 저장 배열 생성
-    unsigned char **labelData = (unsigned char **)malloc(sizeof(unsigned char *) * BATCH_SIZE);
-    for (int i = 0; i < BATCH_SIZE; i++)
-    { // 10개의 라벨 데이터 정보를 저장할 배열 동적 할당
-        labelData[i] = (unsigned char *)malloc(sizeof(unsigned char) * labelSize);
-    }
-
-    unsigned char tempLabel = 0; // 파일에서 읽어올 1바이트 분량의 임시 변수
-    // 파일에서 실제 정답 라벨 1개를 읽기
-    // One-Hot Encoding 변환
-    for (int i = 0; i < BATCH_SIZE; i++)
-    {
-        fread(&tempLabel, sizeof(unsigned char), 1, label);
-        for (int j = 0; j < labelSize; j++)
-        {
-            if (j == tempLabel)
-            {
-                labelData[i][j] = 1; // 정답 인덱스에는 1
-            }
-            else
-            {
-                labelData[i][j] = 0; // 나머지 인덱스에는 0
-            }
-        }
-    }
-
-    // 라벨 데이터 출력
-    for (int i = 0; i < BATCH_SIZE; i++)
-    {
-        for (int k = 0; k < labelSize; k++)
-        {
-            printf("%d ", labelData[i][k]);
-        }
-        printf("\n");
-    }
+    unsigned char **allImage = allImgData(imgSize, imgCount, img); // 전체 이미지 데이터 저장
+    unsigned char **allLabels = allLabelData(labelCount, label);   // 라벨 데이터 저장
     ////////////////////////////////////////////////////////////////////////////
 
     //////////////////////// 가중치, 편향 행렬 생성 및 초기화 //////////////////////////
-    // weight layer 1 : 512 * 784 weights
     int hiddenLayer1Count = 512; // 은닉층1 뉴런 개수
     int hiddenLayer2Count = 256; // 은닉층2 뉴런 개수
     int outputLayerCount = 10;   // 출력층 뉴런 개수
-
-    double **inputLayer = (double **)malloc(sizeof(double *) * BATCH_SIZE);
-    for (int i = 0; i < BATCH_SIZE; i++)
-    {
-        inputLayer[i] = (double *)malloc(sizeof(double) * imgSize);
-    }
-
-    for (int i = 0; i < BATCH_SIZE; i++) // Input Layer가 unsigned char형이라 double로 전처리
-    {
-        for (int j = 0; j < imgSize; j++)
-        {
-            inputLayer[i][j] = (double)imgBuffer[i][j] / 255.0; // 기울기 소실 방지 위해 255로 나누어 0~1 값으로 정규화
-        }
-    }
 
     double **weightLayer1 = createWeightLayer(imgSize, hiddenLayer1Count);           // weight layer 1(512 * 784) 생성
     double **weightLayer2 = createWeightLayer(hiddenLayer1Count, hiddenLayer2Count); // weight layer 2(256 * 512) 생성
     double **weightLayer3 = createWeightLayer(hiddenLayer2Count, outputLayerCount);  // weight layer 3(10 * 256) 생성
 
-    double *biasLayer1 = createBiasLayer(imgSize, hiddenLayer1Count);           // bias layer 1(512 * 1) 생성
-    double *biasLayer2 = createBiasLayer(hiddenLayer1Count, hiddenLayer2Count); // bias layer 2(256 * 1) 생성
-    double *biasLayer3 = createBiasLayer(hiddenLayer2Count, outputLayerCount);  // bias layer 3(10 * 1) 생성
+    double **biasLayer1 = createBiasLayer(imgSize, hiddenLayer1Count);           // bias layer 1(512 * 1) 생성
+    double **biasLayer2 = createBiasLayer(hiddenLayer1Count, hiddenLayer2Count); // bias layer 2(256 * 1) 생성
+    double **biasLayer3 = createBiasLayer(hiddenLayer2Count, outputLayerCount);  // bias layer 3(10 * 1) 생성
     ////////////////////////////////////////////////////////////////////////////
 
-    ///////////////////// Forward Propagation(순전파) 연산 //////////////////////
-    // 1. z1 = weight layer 1 * imgBuffer[0] + bias 1 계산
-    double *z1 = linear(weightLayer1, inputLayer[0], biasLayer1, imgSize, hiddenLayer1Count);
-    // 2. a1 = sigmoid(z1) 계산
-    double *a1 = activate(z1, hiddenLayer1Count, sigmoid);
-    // 3. z2 = weight layer 2 * a1 + bias 2 계산
-    double *z2 = linear(weightLayer2, a1, biasLayer2, hiddenLayer1Count, hiddenLayer2Count);
-    // 4. a2 = sigmoid(z2) 계산
-    double *a2 = activate(z2, hiddenLayer2Count, sigmoid);
-    // 5. z3 = weight layer 3 * a2 + bias 3 계산
-    double *z3 = linear(weightLayer3, a2, biasLayer3, hiddenLayer2Count, outputLayerCount);
-    // 6. a3 = softmax(z3) 계산
-    double *a3 = softmax(z3, outputLayerCount);
-    ////////////////////////////////////////////////////////////////////////////
+    for (int e = 0; e < EPOCH_SIZE; e++)
+    { // EPOCH 만큼 반복
+        printf("------EPOCH %d------\n", e + 1);
+        for (int i = 0; i < imgCount / BATCH_SIZE; i++) //
+        {
+            printf("--%d ~ %d 데이터로 학습--\n", i * BATCH_SIZE, BATCH_SIZE * (i + 1));
+            //////////////////////// 이미지, 라벨 데이터 전처리 //////////////////////////
+            double offset = i * BATCH_SIZE;
+            double **inputLayer = preprocessImgData(imgSize, offset, allImage);            // 이미지 데이터 전처리
+            unsigned char **labelData = preprocessLabelData(labelSize, offset, allLabels); // 라벨 데이터 전처리
+            ////////////////////////////////////////////////////////////////////////////
 
-    ///////////////////// Back Propagation(역전파) 연산 ////////////////////////
-    double *outputDelta = createOutputDelta(labelData[0], a3, outputLayerCount);
-    double *hiddenLayer2Delta = createHiddenDelta(z2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
-    double *hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
+            ///////////////////// Forward Propagation(순전파) 연산 //////////////////////
+            double **z1 = linear(weightLayer1, inputLayer, biasLayer1, imgSize, hiddenLayer1Count);
+            double **a1 = activate(z1, hiddenLayer1Count, sigmoid);
+            double **z2 = linear(weightLayer2, a1, biasLayer2, hiddenLayer1Count, hiddenLayer2Count);
+            double **a2 = activate(z2, hiddenLayer2Count, sigmoid);
+            double **z3 = linear(weightLayer3, a2, biasLayer3, hiddenLayer2Count, outputLayerCount);
+            double **a3 = softmax(z3, outputLayerCount);
+            ////////////////////////////////////////////////////////////////////////////
 
-    backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount, biasLayer3, LEARNING_RATE);
-    backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count, biasLayer2, LEARNING_RATE);
-    backpropagation(inputLayer[0], hiddenLayer1Delta, weightLayer1, imgSize, hiddenLayer1Count, biasLayer1, LEARNING_RATE);
-    ////////////////////////////////////////////////////////////////////////////
+            ///////////////////// Back Propagation(역전파) 연산 /////////////////////////
+            double **outputDelta = createOutputDelta(labelData, a3, outputLayerCount);
+            double **hiddenLayer2Delta = createHiddenDelta(z2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
+            double **hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
 
-    ////////////////////// 테스트 데이터셋 이용해서 테스트 ///////////////////////
+            backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount, biasLayer3, LEARNING_RATE);
+            backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count, biasLayer2, LEARNING_RATE);
+            backpropagation(inputLayer, hiddenLayer1Delta, weightLayer1, imgSize, hiddenLayer1Count, biasLayer1, LEARNING_RATE);
+            ////////////////////////////////////////////////////////////////////////////
+
+            ////////////////////////////// 메모리 초기화 ////////////////////////////////
+            memoryFree(inputLayer, BATCH_SIZE);
+            memoryFree(z1, BATCH_SIZE);
+            memoryFree(a1, BATCH_SIZE);
+            memoryFree(z2, BATCH_SIZE);
+            memoryFree(a2, BATCH_SIZE);
+            memoryFree(z3, BATCH_SIZE);
+            memoryFree(a3, BATCH_SIZE);
+            memoryFree(outputDelta, BATCH_SIZE);
+            memoryFree(hiddenLayer2Delta, BATCH_SIZE);
+            memoryFree(hiddenLayer1Delta, BATCH_SIZE);
+            for (int i = 0; i < BATCH_SIZE; i++)
+                free(labelData[i]);
+            free(labelData);
+            ////////////////////////////////////////////////////////////////////////////
+        }
+    }
+
+    ///////////////////////////////// TEST ////////////////////////////////////
     FILE *testImg = fopen("t10k-images.idx3-ubyte", "rb");   // MNIST 테스트 이미지 데이터 입력
     FILE *testLabel = fopen("t10k-labels.idx1-ubyte", "rb"); // MNIST 테스트 라벨 데이터 입력
 
@@ -366,6 +462,7 @@ int main()
     fread(&testImgCount, sizeof(testImgCount), 1, testImg);       // 데이터 개수 추출
     fread(&testLabelCount, sizeof(testLabelCount), 1, testLabel); // 라벨 데이터의 개수 추출
     testImgCount = reverseInt(testImgCount);
+    testLabelCount = reverseInt(testLabelCount);
 
     fread(&testImgWidth, sizeof(testImgWidth), 1, testImg); // 가로 크기 추출
     testImgWidth = reverseInt(testImgWidth);
@@ -375,14 +472,58 @@ int main()
 
     int testImgSize = testImgWidth * testImgHeight; // 이미지 크기 저장
 
-    ////////////////////////////// 메모리 해제 //////////////////////////////////
-    for (int i = 0; i < BATCH_SIZE; i++)
-        free(imgBuffer[i]);
-    free(imgBuffer);
+    unsigned char **testAllImage = allImgData(testImgSize, testImgCount, testImg);    // 전체 이미지 데이터 저장
+    unsigned char **testAllLabels = allLabelData(testLabelCount, testLabel);          // 라벨 데이터 저장
+    double **testInputLayer = preprocessImgData(imgSize, 0, testAllImage);            // 이미지 데이터 전처리
+    unsigned char **testLabelData = preprocessLabelData(labelSize, 0, testAllLabels); // 라벨 데이터 전처리
 
-    for (int i = 0; i < BATCH_SIZE; i++)
-        free(labelData[i]);
-    free(labelData);
+    double **test_z1 = linear(weightLayer1, testInputLayer, biasLayer1, imgSize, hiddenLayer1Count);
+    double **test_a1 = activate(test_z1, hiddenLayer1Count, sigmoid);
+    double **test_z2 = linear(weightLayer2, test_a1, biasLayer2, hiddenLayer1Count, hiddenLayer2Count);
+    double **test_a2 = activate(test_z2, hiddenLayer2Count, sigmoid);
+    double **test_z3 = linear(weightLayer3, test_a2, biasLayer3, hiddenLayer2Count, outputLayerCount);
+    double **test_a3 = softmax(test_z3, outputLayerCount);
+    ////////////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////// CLI 출력 부분 ///////////////////////////////
+    // 이미지 데이터 출력
+    for (int y = 0; y < testImgHeight; y++)
+    {
+        for (int x = 0; x < testImgWidth; x++)
+        {
+            unsigned char pixel = (unsigned char)(testInputLayer[0][y * testImgWidth + x] * 255.0); // 현재 픽셀의 위치 정보
+            if (x < 2 || x >= testImgWidth - 2)
+            {
+                printf(ANSI_RESET "  "); // 이미지 깨짐 문제 방지 위해 양 옆 2개의 픽셀 초기화
+            }
+            else
+            {
+                printf("\033[48;2;%d;%d;%dm  ", pixel, pixel, pixel); // 이미지 출력
+            }
+        }
+        printf(ANSI_RESET "\n"); // 줄바꾸면서 초기화
+    }
+
+    // 정답 라벨 출력
+    int ans = 0;
+    for (int i = 0; i < labelSize; i++)
+    {
+        if (testLabelData[0][i] == 1)
+        {
+            ans = i;
+            break;
+        }
+    }
+    printf("answer : %d\n", ans);
+
+    // 0~9 확률 출력
+    for (int i = 0; i < labelSize; i++)
+    {
+        printf("%d 일 확률 : %f\n", i, test_a3[0][i]);
+    }
+    ////////////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////// 메모리 해제 //////////////////////////////////
 
     for (int i = 0; i < hiddenLayer1Count; i++)
         free(weightLayer1[i]);
@@ -396,20 +537,23 @@ int main()
         free(weightLayer3[i]);
     free(weightLayer3);
 
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        free(biasLayer1[i]);
+    }
     free(biasLayer1);
+
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        free(biasLayer2[i]);
+    }
     free(biasLayer2);
+
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        free(biasLayer3[i]);
+    }
     free(biasLayer3);
-
-    free(z1);
-    free(a1);
-    free(z2);
-    free(a2);
-    free(z3);
-    free(a3);
-
-    free(outputDelta);
-    free(hiddenLayer2Delta);
-    free(hiddenLayer1Delta);
 
     fclose(img);
     fclose(label);
