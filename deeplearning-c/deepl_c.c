@@ -5,8 +5,11 @@
 
 #define ANSI_RESET "\033[0m"
 #define BATCH_SIZE 64      // batch 크기
-#define EPOCH_SIZE 100     // epoch 크기
+#define EPOCH_SIZE 10      // epoch 크기
 #define LEARNING_RATE 0.01 // 학습률 크기
+#define BETA1 0.9
+#define BETA2 0.999
+#define epsilon 1e-8
 
 /*
 Deep Learning Information
@@ -30,7 +33,7 @@ optimizer algorithm : Adam Optimizer
 // 2차원 동적 할당 배열 메모리 초기화 함수
 void memoryFree(double **x, int n)
 {
-    for (int i = 0; i < BATCH_SIZE; i++)
+    for (int i = 0; i < n; i++)
     {
         free(x[i]);
     }
@@ -160,27 +163,17 @@ double **createWeightLayer(int input, int output)
 }
 
 // 편향 행렬 생성 및 초기화 함수
-double **createBiasLayer(int input, int output)
+double *createBiasLayer(int input, int output)
 {
-    // 편향 행렬 동적 할당
-    double **layer = (double **)malloc(sizeof(double *) * BATCH_SIZE);
-    for (int i = 0; i < BATCH_SIZE; i++)
-    {
-        layer[i] = (double *)malloc(sizeof(double) * output);
-    }
-
-    // Xavier's uniform distribution 초기화 범위 계산
-    double limit = sqrt(6.0 / ((double)input + (double)output));
+    // 배치 사이즈 루프 제거 -> 1차원 배열 할당
+    double *layer = (double *)malloc(sizeof(double) * output);
 
     // Xavier 초기화
-    for (int k = 0; k < BATCH_SIZE; k++)
+    double limit = sqrt(6.0 / ((double)input + (double)output));
+    for (int i = 0; i < output; i++)
     {
-        for (int i = 0; i < output; i++)
-        {
-            layer[k][i] = ((double)rand() / RAND_MAX) * (2.0 * limit) - limit;
-        }
+        layer[i] = ((double)rand() / RAND_MAX) * (2.0 * limit) - limit;
     }
-
     return layer;
 }
 
@@ -253,7 +246,7 @@ double **activate(double **z, int size, double (*func)(double)) // z: 활성화 
 }
 
 // 순전파 연산 함수
-double **linear(double **w, double **x, double **b, int input, int output) // w: weight layer, x: input layer, b: bias layer, input: x의 node 개수, output: 출력되는 node 개수
+double **linear(double **w, double **x, double *b, int input, int output) // w: weight layer, x: input layer, b: bias layer, input: x의 node 개수, output: 출력되는 node 개수
 {
     double **z = (double **)malloc(sizeof(double *) * BATCH_SIZE); // z 연산 결과 저장 배열
     for (int i = 0; i < BATCH_SIZE; i++)
@@ -265,7 +258,7 @@ double **linear(double **w, double **x, double **b, int input, int output) // w:
     {
         for (int i = 0; i < output; i++)
         {
-            z[k][i] = b[k][i]; // 편향 더해놓기
+            z[k][i] = b[i]; // 편향 더해놓기
             for (int j = 0; j < input; j++)
             {
                 z[k][i] += w[i][j] * x[k][j]; // 역전파 계산
@@ -326,29 +319,100 @@ double gradientDescent(double dL_dw, double w, double n)
     return w - n * dL_dw;
 }
 
-// 역전파 계산 함수
-void backpropagation(double **x, double **delta, double **w, int inputSize, int deltaSize, double **b, double learningRate)
+// Adam Optimizer 함수
+double Adam(double dL_dw, double w, double alpha, double *m, double *v, double fix1, double fix2)
+// dL_dw: 기울기, w: 현재 가중치, alpha: 학습률, m: 1차 모멘텀 포인터, v: 2차 모멘텀 포인터, t: 현재 단계(step)
 {
-    for (int k = 0; k < BATCH_SIZE; k++)
+    // 1차 모멘텀 계산 (Momentum)
+    *m = BETA1 * (*m) + (1.0 - BETA1) * dL_dw;
+
+    // 2차 모멘텀 계산 (RMSProp)
+    *v = BETA2 * (*v) + (1.0 - BETA2) * (dL_dw * dL_dw);
+
+    // 편향 보정: m / (1.0 - pow(beta1, t))
+    double m_hat = *m * fix1;
+    double v_hat = *v * fix2;
+
+    // 가중치 업데이트
+    return w - alpha * m_hat / (sqrt(v_hat) + epsilon);
+}
+
+// Adam을 위한 0으로 초기화된 메모리 생성 함수
+double **createZeroLayer(int input, int output)
+{
+    double **layer = (double **)malloc(sizeof(double *) * output);
+    for (int i = 0; i < output; i++)
+    {
+        layer[i] = (double *)calloc(input, sizeof(double)); // 0으로 초기화
+    }
+    return layer;
+}
+
+// 편향용 0으로 초기화된 메모리 생성 함수
+double *createZeroBiasLayer(int output)
+{
+    // 배치 사이즈 루프 제거 -> calloc으로 한 번에 할당
+    double *layer = (double *)calloc(output, sizeof(double));
+    return layer;
+}
+
+// 역전파 계산 함수
+void backpropagation(double **x, double **delta, double **w, int inputSize, int deltaSize,
+                     double *b, double learningRate,
+                     double **m, double **v, // 가중치용 m, v
+                     double *mb, double *vb, // 편향용 m, v
+                     int t)
+{
+    double fix1 = 1.0 / (1.0 - pow(BETA1, t));
+    double fix2 = 1.0 / (1.0 - pow(BETA2, t));
+
+    // 가중치 기울기 누적용 임시 배열
+    for (int j = 0; j < deltaSize; j++)
     {
         for (int i = 0; i < inputSize; i++)
         {
-            for (int j = 0; j < deltaSize; j++)
+            double grad_sum = 0.0;
+            for (int k = 0; k < BATCH_SIZE; k++)
             {
-                // 기울기를 BATCH_SIZE 로 나누어 평균을 구함
-                double dL_dw = (delta[k][j] * x[k][i]) / (double)BATCH_SIZE;
-                w[j][i] = gradientDescent(dL_dw, w[j][i], learningRate);
+                grad_sum += delta[k][j] * x[k][i];
+            }
+            double dL_dw = grad_sum / (double)BATCH_SIZE; // 배치 평균 기울기
+
+            // 배치당 한 번만 Adam 업데이트 수행
+            w[j][i] = Adam(dL_dw, w[j][i], learningRate, &m[j][i], &v[j][i], fix1, fix2);
+        }
+    }
+
+    // 편향 업데이트
+    for (int i = 0; i < deltaSize; i++)
+    {
+        double sum_delta = 0.0;
+        // 배치들의 기울기를 모두 합침
+        for (int k = 0; k < BATCH_SIZE; k++)
+        {
+            sum_delta += delta[k][i];
+        }
+        double dL_db = sum_delta / (double)BATCH_SIZE;
+        // 편향 업데이트
+        b[i] = Adam(dL_db, b[i], learningRate, &mb[i], &vb[i], fix1, fix2);
+    }
+}
+
+// Cross-Entropy 손실 함수
+double crossEntropy(double **predict, unsigned char **target)
+{
+    double totalLoss = 0;
+    for (int i = 0; i < BATCH_SIZE; i++)
+    {
+        for (int j = 0; j < 10; j++)
+        {
+            if (target[i][j] == 1)
+            {
+                totalLoss -= log(predict[i][j] + 1e-9); // log(0) 방지
             }
         }
     }
-    for (int k = 0; k < BATCH_SIZE; k++)
-    {
-        for (int i = 0; i < deltaSize; i++)
-        {
-            // 편향도 마찬가지로 나누기
-            b[k][i] -= (learningRate * delta[k][i]) / (double)BATCH_SIZE;
-        }
-    }
+    return totalLoss / BATCH_SIZE;
 }
 
 int main()
@@ -389,13 +453,35 @@ int main()
     int hiddenLayer2Count = 256; // 은닉층2 뉴런 개수
     int outputLayerCount = 10;   // 출력층 뉴런 개수
 
-    double **weightLayer1 = createWeightLayer(imgSize, hiddenLayer1Count);           // weight layer 1(512 * 784) 생성
-    double **weightLayer2 = createWeightLayer(hiddenLayer1Count, hiddenLayer2Count); // weight layer 2(256 * 512) 생성
-    double **weightLayer3 = createWeightLayer(hiddenLayer2Count, outputLayerCount);  // weight layer 3(10 * 256) 생성
+    // 가중치 레이어 생성
+    double **weightLayer1 = createWeightLayer(imgSize, hiddenLayer1Count);           // 512 * 784
+    double **weightLayer2 = createWeightLayer(hiddenLayer1Count, hiddenLayer2Count); // 256 * 512 생성
+    double **weightLayer3 = createWeightLayer(hiddenLayer2Count, outputLayerCount);  // 10 * 256 생성
 
-    double **biasLayer1 = createBiasLayer(imgSize, hiddenLayer1Count);           // bias layer 1(512 * 1) 생성
-    double **biasLayer2 = createBiasLayer(hiddenLayer1Count, hiddenLayer2Count); // bias layer 2(256 * 1) 생성
-    double **biasLayer3 = createBiasLayer(hiddenLayer2Count, outputLayerCount);  // bias layer 3(10 * 1) 생성
+    // 편향 레이어 생성
+    double *biasLayer1 = createBiasLayer(imgSize, hiddenLayer1Count);           // bias layer 1(512 * 1) 생성
+    double *biasLayer2 = createBiasLayer(hiddenLayer1Count, hiddenLayer2Count); // bias layer 2(256 * 1) 생성
+    double *biasLayer3 = createBiasLayer(hiddenLayer2Count, outputLayerCount);  // bias layer 3(10 * 1) 생성
+
+    // Adam 가중치 저장용 레이어 생성 (m, v)
+    double **m1 = createZeroLayer(imgSize, hiddenLayer1Count);
+    double **v1 = createZeroLayer(imgSize, hiddenLayer1Count);
+    double **m2 = createZeroLayer(hiddenLayer1Count, hiddenLayer2Count);
+    double **v2 = createZeroLayer(hiddenLayer1Count, hiddenLayer2Count);
+    double **m3 = createZeroLayer(hiddenLayer2Count, outputLayerCount);
+    double **v3 = createZeroLayer(hiddenLayer2Count, outputLayerCount);
+
+    // Adam 편향 저장용 레이어 생성 (m, v)
+    double *mb1 = createZeroBiasLayer(hiddenLayer1Count);
+    double *vb1 = createZeroBiasLayer(hiddenLayer1Count);
+
+    double *mb2 = createZeroBiasLayer(hiddenLayer2Count);
+    double *vb2 = createZeroBiasLayer(hiddenLayer2Count);
+
+    double *mb3 = createZeroBiasLayer(outputLayerCount);
+    double *vb3 = createZeroBiasLayer(outputLayerCount);
+
+    int totalStep = 1;
     ////////////////////////////////////////////////////////////////////////////
 
     for (int e = 0; e < EPOCH_SIZE; e++)
@@ -403,7 +489,6 @@ int main()
         printf("------EPOCH %d------\n", e + 1);
         for (int i = 0; i < imgCount / BATCH_SIZE; i++) //
         {
-            printf("--%d ~ %d 데이터로 학습--\n", i * BATCH_SIZE, BATCH_SIZE * (i + 1));
             //////////////////////// 이미지, 라벨 데이터 전처리 //////////////////////////
             double offset = i * BATCH_SIZE;
             double **inputLayer = preprocessImgData(imgSize, offset, allImage);            // 이미지 데이터 전처리
@@ -419,14 +504,19 @@ int main()
             double **a3 = softmax(z3, outputLayerCount);
             ////////////////////////////////////////////////////////////////////////////
 
+            //////////////// Batch 당 손실 함수를 통한 Loss 연산 후 출력 /////////////////
+            double currentLoss = crossEntropy(a3, labelData);
+            printf("Epoch [%2d/%2d] Batch [%4d/%4d] Loss: %.4f\n", e + 1, EPOCH_SIZE, i, imgCount / BATCH_SIZE, currentLoss);
+            ////////////////////////////////////////////////////////////////////////////
+
             ///////////////////// Back Propagation(역전파) 연산 /////////////////////////
             double **outputDelta = createOutputDelta(labelData, a3, outputLayerCount);
             double **hiddenLayer2Delta = createHiddenDelta(z2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
             double **hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
 
-            backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount, biasLayer3, LEARNING_RATE);
-            backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count, biasLayer2, LEARNING_RATE);
-            backpropagation(inputLayer, hiddenLayer1Delta, weightLayer1, imgSize, hiddenLayer1Count, biasLayer1, LEARNING_RATE);
+            backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount, biasLayer3, LEARNING_RATE, m3, v3, mb3, vb3, totalStep);
+            backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count, biasLayer2, LEARNING_RATE, m2, v2, mb2, vb2, totalStep);
+            backpropagation(inputLayer, hiddenLayer1Delta, weightLayer1, imgSize, hiddenLayer1Count, biasLayer1, LEARNING_RATE, m1, v1, mb1, vb1, totalStep);
             ////////////////////////////////////////////////////////////////////////////
 
             ////////////////////////////// 메모리 초기화 ////////////////////////////////
@@ -444,6 +534,8 @@ int main()
                 free(labelData[i]);
             free(labelData);
             ////////////////////////////////////////////////////////////////////////////
+
+            totalStep++;
         }
     }
 
@@ -487,73 +579,64 @@ int main()
 
     ////////////////////////////// CLI 출력 부분 ///////////////////////////////
     // 이미지 데이터 출력
-    for (int y = 0; y < testImgHeight; y++)
+    for (int k = 0; k < 30; k++)
     {
-        for (int x = 0; x < testImgWidth; x++)
+        for (int y = 0; y < testImgHeight; y++)
         {
-            unsigned char pixel = (unsigned char)(testInputLayer[0][y * testImgWidth + x] * 255.0); // 현재 픽셀의 위치 정보
-            if (x < 2 || x >= testImgWidth - 2)
+            for (int x = 0; x < testImgWidth; x++)
             {
-                printf(ANSI_RESET "  "); // 이미지 깨짐 문제 방지 위해 양 옆 2개의 픽셀 초기화
+                unsigned char pixel = (unsigned char)(testInputLayer[k][y * testImgWidth + x] * 255.0); // 현재 픽셀의 위치 정보
+                if (x < 2 || x >= testImgWidth - 2)
+                {
+                    printf(ANSI_RESET "  "); // 이미지 깨짐 문제 방지 위해 양 옆 2개의 픽셀 초기화
+                }
+                else
+                {
+                    printf("\033[48;2;%d;%d;%dm  ", pixel, pixel, pixel); // 이미지 출력
+                }
             }
-            else
+            printf(ANSI_RESET "\n"); // 줄바꾸면서 초기화
+        }
+
+        // 정답 라벨 출력
+        int ans = 0;
+        for (int i = 0; i < labelSize; i++)
+        {
+            if (testLabelData[k][i] == 1)
             {
-                printf("\033[48;2;%d;%d;%dm  ", pixel, pixel, pixel); // 이미지 출력
+                ans = i;
+                break;
             }
         }
-        printf(ANSI_RESET "\n"); // 줄바꾸면서 초기화
-    }
+        printf("answer : %d\n", ans);
 
-    // 정답 라벨 출력
-    int ans = 0;
-    for (int i = 0; i < labelSize; i++)
-    {
-        if (testLabelData[0][i] == 1)
+        // 0~9 확률 출력
+        for (int i = 0; i < labelSize; i++)
         {
-            ans = i;
-            break;
+            printf("%d 일 확률 : %f\n", i, test_a3[k][i]);
         }
-    }
-    printf("answer : %d\n", ans);
-
-    // 0~9 확률 출력
-    for (int i = 0; i < labelSize; i++)
-    {
-        printf("%d 일 확률 : %f\n", i, test_a3[0][i]);
     }
     ////////////////////////////////////////////////////////////////////////////
 
     ////////////////////////////// 메모리 해제 //////////////////////////////////
-
-    for (int i = 0; i < hiddenLayer1Count; i++)
-        free(weightLayer1[i]);
-    free(weightLayer1);
-
-    for (int i = 0; i < hiddenLayer2Count; i++)
-        free(weightLayer2[i]);
-    free(weightLayer2);
-
-    for (int i = 0; i < outputLayerCount; i++)
-        free(weightLayer3[i]);
-    free(weightLayer3);
-
-    for (int i = 0; i < BATCH_SIZE; i++)
-    {
-        free(biasLayer1[i]);
-    }
+    memoryFree(weightLayer1, hiddenLayer1Count);
+    memoryFree(weightLayer2, hiddenLayer2Count);
+    memoryFree(weightLayer3, outputLayerCount);
     free(biasLayer1);
-
-    for (int i = 0; i < BATCH_SIZE; i++)
-    {
-        free(biasLayer2[i]);
-    }
     free(biasLayer2);
-
-    for (int i = 0; i < BATCH_SIZE; i++)
-    {
-        free(biasLayer3[i]);
-    }
     free(biasLayer3);
+    memoryFree(m1, hiddenLayer1Count);
+    memoryFree(v1, hiddenLayer1Count);
+    memoryFree(m2, hiddenLayer2Count);
+    memoryFree(v2, hiddenLayer2Count);
+    memoryFree(m3, outputLayerCount);
+    memoryFree(v3, outputLayerCount);
+    free(mb1);
+    free(vb1);
+    free(mb2);
+    free(vb2);
+    free(mb3);
+    free(vb3);
 
     fclose(img);
     fclose(label);
