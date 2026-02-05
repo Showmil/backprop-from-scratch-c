@@ -5,7 +5,7 @@
 
 #define ANSI_RESET "\033[0m"
 #define BATCH_SIZE 64      // batch 크기
-#define EPOCH_SIZE 10      // epoch 크기
+#define EPOCH_SIZE 40      // epoch 크기
 #define LEARNING_RATE 0.01 // 학습률 크기
 #define BETA1 0.9
 #define BETA2 0.999
@@ -177,6 +177,17 @@ double *createBiasLayer(int input, int output)
     return layer;
 }
 
+// ReLU 함수
+double ReLU(double n){
+    if (n > 0) return n;
+    else return 0;
+}
+
+double ReLUPrime(double n){
+    if (n > 0) return 1;
+    else return 0;
+}
+
 // sigmoid 함수
 double sigmoid(double n)
 {
@@ -288,8 +299,8 @@ double **createOutputDelta(unsigned char **y, double **a, int size) // y: 정답
 }
 
 // 은닉층 노드 delta 함수
-double **createHiddenDelta(double **z, double **next, double **w, int currSize, int nextSize)
-// z: 현재 레이어의 z값 배열, next: 다음 레이어의 델타값 배열, w: 두 레이어를 잇는 가중치
+double **createHiddenDelta(double **z, double **next, double **w, int currSize, int nextSize, double (*func)(double))
+// z: 현재 레이어의 z값 배열, next: 다음 레이어의 델타값 배열, w: 두 레이어를 잇는 가중치, func: 미분값 return하는 함수
 {
     double **d = (double **)malloc(sizeof(double *) * BATCH_SIZE);
     for (int i = 0; i < BATCH_SIZE; i++)
@@ -306,7 +317,8 @@ double **createHiddenDelta(double **z, double **next, double **w, int currSize, 
             {
                 sum += w[j][i] * next[k][j];
             }
-            d[k][i] = sum * sigmoid(z[k][i]) * (1 - sigmoid(z[k][i]));
+            // sigmoid: d[k][i] = sum * sigmoid(z[k][i]) * (1 - sigmoid(z[k][i]));
+            d[k][i] = sum * func(z[k][i]);
         }
     }
     return d;
@@ -511,8 +523,8 @@ int main()
 
             ///////////////////// Back Propagation(역전파) 연산 /////////////////////////
             double **outputDelta = createOutputDelta(labelData, a3, outputLayerCount);
-            double **hiddenLayer2Delta = createHiddenDelta(z2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount);
-            double **hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count);
+            double **hiddenLayer2Delta = createHiddenDelta(z2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount, sigmoidPrime);
+            double **hiddenLayer1Delta = createHiddenDelta(z1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count, sigmoidPrime);
 
             backpropagation(a2, outputDelta, weightLayer3, hiddenLayer2Count, outputLayerCount, biasLayer3, LEARNING_RATE, m3, v3, mb3, vb3, totalStep);
             backpropagation(a1, hiddenLayer2Delta, weightLayer2, hiddenLayer1Count, hiddenLayer2Count, biasLayer2, LEARNING_RATE, m2, v2, mb2, vb2, totalStep);
