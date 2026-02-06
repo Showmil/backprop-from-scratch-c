@@ -4,8 +4,8 @@
 #include <time.h>   // 시간 관련 함수
 
 #define ANSI_RESET "\033[0m"
-#define BATCH_SIZE 64      // batch 크기
-#define EPOCH_SIZE 40      // epoch 크기
+#define BATCH_SIZE 128     // batch 크기
+#define EPOCH_SIZE 20       // epoch 크기
 #define LEARNING_RATE 0.01 // 학습률 크기
 #define BETA1 0.9
 #define BETA2 0.999
@@ -178,14 +178,20 @@ double *createBiasLayer(int input, int output)
 }
 
 // ReLU 함수
-double ReLU(double n){
-    if (n > 0) return n;
-    else return 0;
+double ReLU(double n)
+{
+    if (n > 0)
+        return n;
+    else
+        return 0;
 }
 
-double ReLUPrime(double n){
-    if (n > 0) return 1;
-    else return 0;
+double ReLUPrime(double n)
+{
+    if (n > 0)
+        return 1;
+    else
+        return 0;
 }
 
 // sigmoid 함수
