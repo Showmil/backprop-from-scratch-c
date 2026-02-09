@@ -4,7 +4,7 @@
 #include <time.h>   // 시간 관련 함수
 
 #define ANSI_RESET "\033[0m"
-#define BATCH_SIZE 128     // batch 크기
+#define BATCH_SIZE 64     // batch 크기
 #define EPOCH_SIZE 20       // epoch 크기
 #define LEARNING_RATE 0.01 // 학습률 크기
 #define BETA1 0.9
