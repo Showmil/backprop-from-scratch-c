@@ -4,9 +4,9 @@
 #include <time.h>   // 시간 관련 함수
 
 #define ANSI_RESET "\033[0m"
-#define BATCH_SIZE 64      // batch 크기
-#define EPOCH_SIZE 40      // epoch 크기
-#define LEARNING_RATE 0.01f // 학습률 크기
+#define BATCH_SIZE 32        // batch 크기
+#define EPOCH_SIZE 30        // epoch 크기
+#define LEARNING_RATE 0.001f // 학습률 크기
 #define BETA1 0.9f
 #define BETA2 0.999f
 #define epsilon 1e-8f
@@ -297,7 +297,8 @@ float Adam(float dL_dw, float w, float alpha, float *m, float *v, float fix1, fl
     *v = BETA2 * (*v) + (1.0f - BETA2) * (dL_dw * dL_dw);
 
     // v가 0에 너무 가까우면 강제로 아주 작은 값을 더해줌
-    if (*v < TINY_NUM) *v = TINY_NUM;
+    if (*v < TINY_NUM)
+        *v = TINY_NUM;
 
     float m_hat = *m * fix1;
     float v_hat = *v * fix2;
@@ -387,12 +388,10 @@ int main()
     DenseLayer *layer2 = createLayer(hidden1, hidden2);
     DenseLayer *layer3 = createLayer(hidden2, output);
 
-    // -------------------------------------------------------------------------
-    //                                    메모리 버퍼 생성
-    // -------------------------------------------------------------------------
+    // --------------------- 메모리 버퍼 생성 ---------------------
 
     // 입력 데이터와 라벨 데이터를 담을 버퍼 생성
-    float **inputBuffer = createBuffer(imgSize);              // 전처리된 이미지 저장용
+    float **inputBuffer = createBuffer(imgSize);               // 전처리된 이미지 저장용
     unsigned char **labelBuffer = createCharBuffer(labelSize); // One-Hot 라벨 저장용
 
     // Layer 1 계산 결과 저장용 버퍼
@@ -426,9 +425,7 @@ int main()
             preprocessImgData(imgSize, offset, allImage, inputBuffer);
             preprocessLabelData(labelSize, offset, allLabels, labelBuffer);
 
-            // -----------------------------------------------------------------
-            //                                 순전파 과정 (Forward Propagation)
-            // -----------------------------------------------------------------
+            // --------------------- 순전파 과정 (Forward Propagation) ---------------------
 
             // Layer 1: input -> z1 -> a1
             linear(layer1, inputBuffer, z1Buf);
@@ -446,7 +443,7 @@ int main()
             float currentLoss = crossEntropy(a3Buf, labelBuffer);
             epochLoss += currentLoss;
 
-            // [정확도 계산 추가]
+            // 정확도 계산 추가
             for (int k = 0; k < BATCH_SIZE; k++)
             {
                 if (getArgmax(a3Buf[k], output) == getArgmaxChar(labelBuffer[k], labelSize))
@@ -461,9 +458,7 @@ int main()
                 printf("Epoch [%2d/%2d] Batch [%4d/%4d] Loss: %.4f\n", e + 1, EPOCH_SIZE, i, imgCount / BATCH_SIZE, currentLoss);
             }
 
-            // -----------------------------------------------------------------
-            //                                 역전파 과정 (Back propagation)
-            // -----------------------------------------------------------------
+            // --------------------- 역전파 과정 (Back propagation) ---------------------
 
             // 출력층 오차 계산
             createOutputDelta(labelBuffer, a3Buf, output, d3Buf);
