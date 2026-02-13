@@ -94,6 +94,7 @@ void memoryFree(float **x, int n)
         free(x[i]);
     free(x);
 }
+
 // char 메모리 해제 함수
 void memoryFreeChar(unsigned char **x, int n)
 {
@@ -149,6 +150,7 @@ void preprocessLabelData(int oneHotSize, int offset, unsigned char **allLabels, 
     }
 }
 
+// 4바이트 뒤집기 함수
 int reverseInt(int i)
 {
     unsigned int c1, c2, c3, c4;
