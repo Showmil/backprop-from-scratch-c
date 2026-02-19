@@ -5,7 +5,7 @@
 
 #define ANSI_RESET "\033[0m"
 #define BATCH_SIZE 32        // batch 크기
-#define EPOCH_SIZE 30        // epoch 크기
+#define EPOCH_SIZE 1000        // epoch 크기
 #define LEARNING_RATE 0.001f // 학습률 크기
 #define BETA1 0.9f
 #define BETA2 0.999f
