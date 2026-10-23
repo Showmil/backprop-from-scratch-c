@@ -293,6 +293,57 @@ int main()
             preprocessImgData(imgSize, offset, allImage, inputBuffer);
             preprocessLabelData(labelSize, offset, allLabels, labelBuffer);
 
+            // 발표용 출력을 위해 3개의 입력 노드 인덱스 선언 (스코프 외부)
+            int src_nodes[3] = {0, 1, 2}; 
+            int dst_nodes[3] = {0, 1, 2}; // 은닉층 0, 1, 2번 노드 고정
+
+            if (e == 0 && i == 0)
+            {
+                printImagePixels("학습에 사용된 1번째 이미지 픽셀 구조", inputBuffer, 0, imgWidth, imgHeight);
+
+                // [핵심] '높은값, 중간값, 낮은값'이 나란히 있는 엣지(경계선) 픽셀 3개 찾기
+                int found_edge = 0;
+                for (int p = 0; p < imgSize - 2; p++) {
+                    float v1 = inputBuffer[0][p];
+                    float v2 = inputBuffer[0][p+1];
+                    float v3 = inputBuffer[0][p+2];
+                    
+                    int has_high = (v1 > 0.8f) || (v2 > 0.8f) || (v3 > 0.8f);
+                    int has_mid  = (v1 > 0.1f && v1 <= 0.8f) || (v2 > 0.1f && v2 <= 0.8f) || (v3 > 0.1f && v3 <= 0.8f);
+                    int has_low  = (v1 < 0.1f) || (v2 < 0.1f) || (v3 < 0.1f);
+                    
+                    if (has_high && has_mid && has_low) {
+                        src_nodes[0] = p;
+                        src_nodes[1] = p + 1;
+                        src_nodes[2] = p + 2;
+                        found_edge = 1;
+                        break;
+                    }
+                }
+                
+                // 만약 완벽한 조건을 못 찾으면 적당히 0이 아닌 값 주변을 잡음 (안전장치)
+                if(!found_edge) {
+                    for (int p = 0; p < imgSize - 2; p++) {
+                        if(inputBuffer[0][p] > 0.0f) { src_nodes[0]=p; src_nodes[1]=p+1; src_nodes[2]=p+2; break;}
+                    }
+                }
+
+                printf("\n==========================================================================================\n");
+                printf("  [발표 자료] Adam Optimizer Step 1 수학적 무결성 상세 검증 (3x3 Subgraph)\n");
+                printf("==========================================================================================\n\n");
+
+                printf(">>> [Adam 수식 변수 초기 설정]\n");
+                printf("  * t(Step) = %d\n", totalStep);
+                printf("  * alpha(학습률) = %.4f | Beta1 = %.3f | Beta2 = %.3f\n\n", LEARNING_RATE, BETA1, BETA2);
+
+                printf(">>> [이미지 특성 노드 추출 (경계선 부분: 높은 픽셀값, 중간 픽셀값, 0)]\n");
+                for (int s = 0; s < 3; s++) {
+                    int pixel_val = (int)(inputBuffer[0][src_nodes[s]] * 255.0f);
+                    printf("  - input layer[%d] 실제 픽셀값: %3d (정규화: %.5f)\n", src_nodes[s], pixel_val, inputBuffer[0][src_nodes[s]]);
+                }
+                printf("\n");
+            }
+
             // 순전파 연산
             linear(layer1, inputBuffer, z1Buf); activate(z1Buf, hidden1, ReLU, a1Buf);
             linear(layer2, a1Buf, z2Buf); activate(z2Buf, hidden2, ReLU, a2Buf);
@@ -304,29 +355,11 @@ int main()
             createHiddenDelta(z1Buf, d2Buf, layer2, hidden1, ReLUPrime, d1Buf);
 
             // =========================================================================================
-            // [발표 자료용 출력] Adam Optimizer 변수 검증 및 추적 
+            // [발표 자료용 출력] Adam Optimizer 변수 검증 및 추적
             // =========================================================================================
             if (e == 0 && i == 0)
             {
-                printImagePixels("학습에 사용된 1번째 이미지 픽셀 구조", inputBuffer, 0, imgWidth, imgHeight);
-
-                int src_nodes[3] = {0,};
-                int dst_nodes[3] = {0, 1, 2}; 
-                int found = 0;
-                for (int p = 0; p < imgSize && found < 3; p++) {
-                    if (inputBuffer[0][p] > 0.0f) { src_nodes[found] = p; found++; }
-                }
-                while (found < 3) { src_nodes[found] = found; found++; }
-
-                printf("\n==========================================================================================\n");
-                printf("  [발표 자료] Adam Optimizer Step 1 수학적 무결성 상세 검증 (3x3 Subgraph)\n");
-                printf("==========================================================================================\n\n");
-
-                printf(">>> [Adam 수식 변수 추적]\n");
-                printf("  * t(Step) = %d\n", totalStep);
-                printf("  * alpha(학습률) = %.4f | Beta1 = %.3f | Beta2 = %.3f\n\n", LEARNING_RATE, BETA1, BETA2);
-
-                // 고정밀도 Adam 연산 출력 매크로 (수치적 무결성 검증용)
+                // 고정밀도 Adam 연산 출력 매크로
                 #define PRINT_ADAM_DETAILED(LAYER, SRC_NAME, DST_NAME, DELTA, PREV_A, SRC_NODES) \
                 for (int d = 0; d < 3; d++) { \
                     for (int s = 0; s < 3; s++) { \
@@ -364,7 +397,7 @@ int main()
 
                 printf("  [Layer 3 가중치 업데이트 (Hidden 2 -> Output)]\n");
                 PRINT_ADAM_DETAILED(layer3, "hidden layer 2", "output layer", d3Buf, a2Buf, dst_nodes);
-                printf("\n==========================================================================================\n\n");
+                printf("==========================================================================================\n\n");
             }
 
             // =========================================================================================
@@ -373,6 +406,17 @@ int main()
             backpropagation(layer2, a1Buf, d2Buf, LEARNING_RATE, totalStep);
             backpropagation(layer1, inputBuffer, d1Buf, LEARNING_RATE, totalStep);
             // =========================================================================================
+
+            if (e == 0 && i == 0)
+            {
+                printf(">>> [실제 함수 적용 후 업데이트 결과 검증 (메모리 반영 확인)]\n");
+                for (int d = 0; d < 3; d++) {
+                    for(int s = 0; s < 3; s++) {
+                        printf("  - input layer[%d] -> hidden layer 1[%d] 실제 갱신된 w_new: %.8f\n", src_nodes[s], dst_nodes[d], layer1->w[dst_nodes[d]][src_nodes[s]]);
+                    }
+                }
+                printf("==========================================================================================\n\n");
+            }
 
             if (i % 100 == 0) {
                 float currentLoss = crossEntropy(a3Buf, labelBuffer);

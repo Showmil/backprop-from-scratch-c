@@ -4,8 +4,8 @@
 #include <time.h>   // 시간 관련 함수
 
 #define ANSI_RESET "\033[0m"
-#define BATCH_SIZE 32        // batch 크기
-#define EPOCH_SIZE 1000        // epoch 크기
+#define BATCH_SIZE 64        // batch 크기
+#define EPOCH_SIZE 70        // epoch 크기
 #define LEARNING_RATE 0.001f // 학습률 크기
 #define BETA1 0.9f
 #define BETA2 0.999f
@@ -34,8 +34,8 @@ typedef struct
     int outputSize;
     float **w;      // 가중치
     float *b;       // 편향
-    float **m, **v; // Adam 가중치 파라미터
-    float *mb, *vb; // Adam 편향 파라미터
+    float **m, **v; // Adam 파라미터
+    float *mb, *vb; // Adam 파라미터
 } DenseLayer;
 
 // 가장 높은 값 인덱스 찾는 함수
@@ -169,7 +169,6 @@ DenseLayer *createLayer(int input, int output)
     layer->outputSize = output;
 
     layer->w = (float **)malloc(sizeof(float *) * output);
-    // float limit = sqrtf(6.0f / ((float)input + (float)output)); // Xavier 초기화
     float limit = sqrtf(6.0f / (float)input); // He 초기화
     for (int i = 0; i < output; i++)
     {
@@ -231,8 +230,10 @@ void softmax(float **z, int size, float **out)
             out[k][i] = expf(z[k][i] - max);
             sum += out[k][i];
         }
+        
+        float inv_sum = 1.0f / sum;
         for (int i = 0; i < size; i++)
-            out[k][i] /= sum;
+            out[k][i] *= inv_sum;
     }
 }
 
@@ -249,16 +250,17 @@ void activate(float **z, int size, float (*func)(float), float **out)
 // 순전파 함수
 void linear(DenseLayer *layer, float **x, float **out)
 {
-#pragma omp parallel for
+    #pragma omp parallel for
     for (int k = 0; k < BATCH_SIZE; k++)
     {
         for (int i = 0; i < layer->outputSize; i++)
         {
-            out[k][i] = layer->b[i]; // 편향
+            float sum = layer->b[i];
             for (int j = 0; j < layer->inputSize; j++)
             {
-                out[k][i] += layer->w[i][j] * x[k][j]; // 가중치 연산
+                sum += layer->w[i][j] * x[k][j]; // 가중치 연산
             }
+            out[k][i] = sum;
         }
     }
 }
@@ -282,12 +284,21 @@ void createHiddenDelta(float **z, float **nextDelta, DenseLayer *nextLayer, int 
     {
         for (int i = 0; i < currSize; i++)
         {
-            float sum = 0.0f;
-            for (int j = 0; j < nextLayer->outputSize; j++)
+            out[k][i] = 0.0f;
+        }
+        
+        for (int j = 0; j < nextLayer->outputSize; j++)
+        {
+            float delta = nextDelta[k][j];
+            for (int i = 0; i < currSize; i++)
             {
-                sum += nextLayer->w[j][i] * nextDelta[k][j];
+                out[k][i] += nextLayer->w[j][i] * delta;
             }
-            out[k][i] = sum * func(z[k][i]);
+        }
+
+        for (int i = 0; i < currSize; i++)
+        {
+            out[k][i] *= func(z[k][i]);
         }
     }
 }
@@ -308,24 +319,33 @@ float Adam(float dL_dw, float w, float alpha, float *m, float *v, float fix1, fl
 }
 
 // Backpropagation
-void backpropagation(DenseLayer *layer, float **x, float **delta, float learningRate, int t)
+void backpropagation(DenseLayer *layer, float **x, float **delta, float learningRate, float beta1_t, float beta2_t)
 {
-    float fix1 = 1.0f / (1.0f - powf(BETA1, t));
-    float fix2 = 1.0f / (1.0f - powf(BETA2, t));
+    float fix1 = 1.0f / (1.0f - beta1_t);
+    float fix2 = 1.0f / (1.0f - beta2_t);
+    float batch_inv = 1.0f / (float)BATCH_SIZE; // 나눗셈 최적화
 
     // 가중치(w) 업데이트
+    float *grad_sum = (float *)malloc(sizeof(float) * layer->inputSize);
     for (int j = 0; j < layer->outputSize; j++)
     {
         for (int i = 0; i < layer->inputSize; i++)
-        {
-            float grad_sum = 0.0f;
-            for (int k = 0; k < BATCH_SIZE; k++)
-                grad_sum += delta[k][j] * x[k][i];
+            grad_sum[i] = 0.0f;
 
-            float dL_dw = grad_sum / (float)BATCH_SIZE;
+        for (int k = 0; k < BATCH_SIZE; k++)
+        {
+            float d = delta[k][j];
+            for (int i = 0; i < layer->inputSize; i++)
+                grad_sum[i] += d * x[k][i];
+        }
+
+        for (int i = 0; i < layer->inputSize; i++)
+        {
+            float dL_dw = grad_sum[i] * batch_inv;
             layer->w[j][i] = Adam(dL_dw, layer->w[j][i], learningRate, &layer->m[j][i], &layer->v[j][i], fix1, fix2);
         }
     }
+    free(grad_sum);
 
     // 편향(b) 업데이트
     for (int i = 0; i < layer->outputSize; i++)
@@ -334,7 +354,7 @@ void backpropagation(DenseLayer *layer, float **x, float **delta, float learning
         for (int k = 0; k < BATCH_SIZE; k++)
             sum_delta += delta[k][i];
 
-        float dL_db = sum_delta / (float)BATCH_SIZE;
+        float dL_db = sum_delta * batch_inv;
         layer->b[i] = Adam(dL_db, layer->b[i], learningRate, &layer->mb[i], &layer->vb[i], fix1, fix2);
     }
 }
@@ -348,7 +368,10 @@ float crossEntropy(float **predict, unsigned char **target)
         for (int j = 0; j < 10; j++)
         {
             if (target[i][j] == 1)
+            {
                 totalLoss -= logf(predict[i][j] + 1e-9f);
+                break;
+            }
         }
     }
     return totalLoss / BATCH_SIZE;
@@ -385,7 +408,7 @@ int main()
     unsigned char **allLabels = allLabelData(labelCount, label);
 
     // Layer 생성 및 초기화
-    int hidden1 = 128, hidden2 = 64, output = 10;
+    int hidden1 = 512, hidden2 = 256, output = 10;
     DenseLayer *layer1 = createLayer(imgSize, hidden1);
     DenseLayer *layer2 = createLayer(hidden1, hidden2);
     DenseLayer *layer3 = createLayer(hidden2, output);
@@ -414,6 +437,8 @@ int main()
     int totalStep = 1;
     float finalTrainLoss = 0.0f;
     float finalTrainAcc = 0.0f;
+    float beta1_t = BETA1;
+    float beta2_t = BETA2;
 
     for (int e = 0; e < EPOCH_SIZE; e++)
     {
@@ -470,11 +495,13 @@ int main()
             createHiddenDelta(z1Buf, d2Buf, layer2, hidden1, ReLUPrime, d1Buf);
 
             // 가중치 업데이트
-            backpropagation(layer3, a2Buf, d3Buf, LEARNING_RATE, totalStep);
-            backpropagation(layer2, a1Buf, d2Buf, LEARNING_RATE, totalStep);
-            backpropagation(layer1, inputBuffer, d1Buf, LEARNING_RATE, totalStep);
+            backpropagation(layer3, a2Buf, d3Buf, LEARNING_RATE, beta1_t, beta2_t);
+            backpropagation(layer2, a1Buf, d2Buf, LEARNING_RATE, beta1_t, beta2_t);
+            backpropagation(layer1, inputBuffer, d1Buf, LEARNING_RATE, beta1_t, beta2_t);
 
             totalStep++;
+            beta1_t *= BETA1;
+            beta2_t *= BETA2;
         }
 
         // 에폭 종료 시 통계 저장
